@@ -23,6 +23,7 @@ interface DashboardData {
     open_incidents: number
     resolved_incidents: number
     critical_alerts: number
+    avg_resolution_time_minutes?: number
   }
   incidents: {
     by_severity: Record<string, number>
@@ -35,6 +36,7 @@ interface DashboardData {
     degraded: number
     offline: number
     avg_health_score: number
+    agents_with_incidents?: number
   }
   judge_layer: {
     total_decisions: number
@@ -42,11 +44,24 @@ interface DashboardData {
     avg_latency_ms: number
     allow_rate: number
     deny_rate: number
+    quarantine_rate?: number
+    escalate_rate?: number
+    top_bypass_pattern?: {
+      id: string
+      name: string
+      detection_count: number
+    } | null
+    agents_under_judge_watch?: number
   }
   playbooks: {
     total: number
     active: number
     success_rate: number
+    most_used?: {
+      id: string
+      name: string
+      executions_24h: number
+    } | null
   }
 }
 
@@ -218,6 +233,11 @@ export default function DashboardPage() {
                 {data.playbooks.active}/{data.playbooks.total}
               </div>
               <p className="text-sm text-gray-500">Active playbooks</p>
+              {data.playbooks.most_used && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Most used: <span className="font-medium text-gray-600">{data.playbooks.most_used.name}</span> ({data.playbooks.most_used.executions_24h})
+                </p>
+              )}
             </div>
             <div className="flex-1">
               <div className="text-2xl font-bold text-gray-900">
@@ -240,6 +260,48 @@ export default function DashboardPage() {
               Operational
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Judge Watch & Bypass Patterns */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Gavel className="w-4 h-4 text-purple-500" />
+            Agents Under Judge Watch
+          </h3>
+          <div className="flex items-center gap-4">
+            <div className="text-3xl font-bold text-gray-900">
+              {data.judge_layer.agents_under_judge_watch || 0}
+            </div>
+            <div className="text-sm text-gray-500">
+              agents with judge decisions tracked
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-orange-500" />
+            Top Bypass Pattern
+          </h3>
+          {data.judge_layer.top_bypass_pattern ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-900">
+                  {data.judge_layer.top_bypass_pattern.name}
+                </span>
+                <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full">
+                  {data.judge_layer.top_bypass_pattern.detection_count} detections
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 font-mono">
+                {data.judge_layer.top_bypass_pattern.id}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No bypass patterns detected</p>
+          )}
         </div>
       </div>
 

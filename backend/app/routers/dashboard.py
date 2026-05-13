@@ -21,6 +21,7 @@ from app.models import (
     TimelineEvent,
 )
 from app.schemas import StandardResponse
+from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -269,7 +270,7 @@ async def get_dashboard(
             "system": {
                 "classification_queue_depth": 0,
                 "playbook_queue_depth": 0,
-                "websocket_connections": 0,
+                "websocket_connections": ws_manager.active_connections,
                 "api_requests_24h": 0,
             },
         },

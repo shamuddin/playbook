@@ -304,6 +304,17 @@ async def classify_incident(
     )
     await db.commit()
 
+    # Broadcast classification complete
+    await ws_manager.broadcast({
+        "event_type": "INCIDENT_CLASSIFIED",
+        "incident_id": incident.incident_id,
+        "severity": incident.severity,
+        "category": incident.category,
+        "incident_type": incident.incident_type,
+        "confidence": incident.confidence,
+        "timestamp": incident.updated_at.isoformat() if incident.updated_at else None,
+    })
+
     return _incident_to_response(incident)
 
 

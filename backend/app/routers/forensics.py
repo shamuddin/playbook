@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models import EvidencePackage, Incident
 from app.schemas import StandardResponse
 from app.services.forensics import ForensicsService
+from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/forensics", tags=["forensics"])
 
@@ -50,6 +51,15 @@ async def get_forensics(
         service = ForensicsService()
         evidence = await service.build_package(db, incident_id)
         await db.commit()
+
+        # Broadcast forensics complete
+        await ws_manager.broadcast({
+            "event_type": "INCIDENT_FORENSICS_COMPLETE",
+            "incident_id": incident_id,
+            "package_id": evidence.package_id,
+            "integrity_hash": evidence.integrity_hash,
+            "timestamp": evidence.created_at.isoformat() if evidence.created_at else None,
+        })
 
     service = ForensicsService()
 
