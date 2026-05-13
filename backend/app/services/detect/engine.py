@@ -304,13 +304,50 @@ class DetectionEngine:
         Args:
             rules: Optional list of rule dicts. If None, uses static bootstrap rules.
         """
-        self._rules = rules if rules is not None else _STATIC_RULES
+        self._rules = rules if rules is not None else list(_STATIC_RULES)
         # Ensure compiled patterns
         for rule in self._rules:
             if "_compiled" not in rule:
                 rule["_compiled"] = [
                     re.compile(p, re.IGNORECASE) for p in rule.get("patterns", [])
                 ]
+
+    async def load_rules_from_db(self, db) -> int:
+        """Load active detection rules from the database.
+
+        Replaces static rules with DB rules. Returns number of rules loaded.
+
+        Args:
+            db: Async SQLAlchemy session.
+        """
+        from sqlalchemy import select
+        from app.models import DetectionRule
+
+        result = await db.execute(
+            select(DetectionRule).where(DetectionRule.is_active == True)
+        )
+        db_rules = result.scalars().all()
+
+        if not db_rules:
+            return 0
+
+        new_rules = []
+        for rule in db_rules:
+            # Split stored pipe-delimited pattern into individual patterns
+            patterns = [p.strip() for p in rule.pattern.split("|") if p.strip()]
+            new_rules.append({
+                "rule_id": rule.rule_id,
+                "name": rule.name,
+                "incident_type": rule.incident_type,
+                "severity": rule.severity,
+                "patterns": patterns,
+                "threshold": rule.threshold or 0.5,
+                "is_active": rule.is_active,
+                "_compiled": [re.compile(p, re.IGNORECASE) for p in patterns],
+            })
+
+        self._rules = new_rules
+        return len(new_rules)
 
     def evaluate(self, event: PB_CES_Event) -> DetectionResult:
         """Evaluate a single event against all rules.

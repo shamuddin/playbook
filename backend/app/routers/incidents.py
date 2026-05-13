@@ -22,6 +22,7 @@ from app.schemas import (
     TimelineEventResponse,
 )
 from app.services.detect import DetectionEngine, IncidentFactory, normalize_event
+from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -159,6 +160,17 @@ async def ingest_event(
     # Create incident
     incident = await IncidentFactory.create_incident(db, event, detection)
     await db.commit()
+
+    # Broadcast to WebSocket clients
+    await ws_manager.broadcast({
+        "event_type": "incident_detected",
+        "incident_id": incident.incident_id,
+        "severity": incident.severity,
+        "category": incident.category,
+        "incident_type": incident.incident_type,
+        "confidence": incident.confidence,
+        "timestamp": incident.created_at.isoformat(),
+    })
 
     return _incident_to_response(incident)
 

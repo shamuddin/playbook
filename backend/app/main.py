@@ -19,6 +19,7 @@ from app.routers import (
     websocket,
 )
 from app.seed import seed_all
+from app.services.detect.tailer import LogTailer
 
 settings = get_settings()
 
@@ -42,8 +43,47 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 print(f"[seed] Warning: seeding failed: {exc}")
 
+    # Start log tailer in demo/development mode
+    tailer = None
+    if settings.is_demo_mode or settings.is_development:
+        from app.services.detect import normalize_event
+        from app.services.detect.engine import DetectionEngine
+        from app.services.detect.incident_factory import IncidentFactory
+        from app.services.websocket_manager import ws_manager
+
+        engine_inst = DetectionEngine()
+
+        async def _on_event(event):
+            """Process tailer events through detection pipeline."""
+            async with AsyncSessionLocal() as session:
+                try:
+                    detection = engine_inst.evaluate(event)
+                    if detection.incident_type is None:
+                        return
+                    incident = await IncidentFactory.create_incident(session, event, detection)
+                    await session.commit()
+                    await ws_manager.broadcast({
+                        "event_type": "incident_detected",
+                        "incident_id": incident.incident_id,
+                        "severity": incident.severity,
+                        "category": incident.category,
+                        "incident_type": incident.incident_type,
+                        "confidence": incident.confidence,
+                        "timestamp": incident.created_at.isoformat(),
+                    })
+                except Exception as exc:
+                    print(f"[tailer] Error processing event: {exc}")
+
+        tailer = LogTailer(on_event=_on_event)
+        await tailer.start()
+        print(f"[tailer] Started monitoring: {tailer.log_dir}")
+
     yield
+
     # Shutdown
+    if tailer is not None:
+        await tailer.stop()
+        print("[tailer] Stopped")
     await engine.dispose()
 
 
