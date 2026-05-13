@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   Shield,
@@ -8,7 +9,11 @@ import {
   TrendingUp,
   TrendingDown,
   Server,
+  Radio,
+  Zap,
+  Clock,
 } from 'lucide-react'
+import { useWebSocket } from '../hooks/useWebSocket'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 
@@ -46,8 +51,10 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const { connected, messages } = useWebSocket()
 
   useEffect(() => {
     fetch(`${API_BASE}/dashboard`)
@@ -234,6 +241,70 @@ export default function DashboardPage() {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Real-Time Incident Feed */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <Zap className="w-4 h-4 text-yellow-500" />
+            Live Incident Feed
+          </h3>
+          <div className="flex items-center gap-2">
+            <Radio className={`w-3 h-3 ${connected ? 'text-green-500' : 'text-gray-400'}`} />
+            <span className={`text-xs ${connected ? 'text-green-600' : 'text-gray-500'}`}>
+              {connected ? 'Live' : 'Disconnected'}
+            </span>
+          </div>
+        </div>
+        {messages.length === 0 ? (
+          <p className="text-sm text-gray-500">Waiting for events...</p>
+        ) : (
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {messages.slice(0, 20).map((msg, i) => (
+              <div
+                key={i}
+                onClick={() => msg.incident_id && navigate(`/incidents/${msg.incident_id}`)}
+                className={`flex items-center gap-3 p-2 rounded-lg text-sm ${
+                  msg.incident_id ? 'cursor-pointer hover:bg-gray-50' : ''
+                } ${
+                  msg.event_type === 'demo_scenario_triggered'
+                    ? 'bg-blue-50'
+                    : msg.event_type === 'incident_status_updated'
+                    ? 'bg-purple-50'
+                    : 'bg-gray-50'
+                }`}
+              >
+                {msg.event_type === 'demo_scenario_triggered' ? (
+                  <Zap className="w-4 h-4 text-blue-500 shrink-0" />
+                ) : msg.event_type === 'incident_status_updated' ? (
+                  <Activity className="w-4 h-4 text-purple-500 shrink-0" />
+                ) : (
+                  <Clock className="w-4 h-4 text-gray-400 shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-gray-900">{msg.event_type}</span>
+                  {msg.incident_id && (
+                    <span className="text-xs text-gray-500 ml-2">{msg.incident_id}</span>
+                  )}
+                  {msg.severity && (
+                    <span className={`ml-2 px-1.5 py-0.5 rounded text-xs font-medium ${
+                      msg.severity === 'critical' ? 'bg-red-100 text-red-700' :
+                      msg.severity === 'high' ? 'bg-orange-100 text-orange-700' :
+                      msg.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-green-100 text-green-700'
+                    }`}>
+                      {msg.severity}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">
+                  {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

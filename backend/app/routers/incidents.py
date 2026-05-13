@@ -353,6 +353,36 @@ async def respond_to_incident(
     )
 
 
+@router.put("/{incident_id}/status", response_model=IncidentResponse)
+async def update_incident_status(
+    incident_id: str,
+    status: str,
+    db: AsyncSession = Depends(get_db),
+) -> IncidentResponse:
+    """Update the status of an incident (human review action)."""
+    incident = await _get_incident_or_404(db, incident_id)
+
+    valid_statuses = {"new", "detected", "classified", "responding", "resolved", "escalated"}
+    if status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status: {status}. Must be one of {valid_statuses}",
+        )
+
+    incident.status = status
+    await db.commit()
+
+    # Broadcast status update via WebSocket
+    await ws_manager.broadcast({
+        "event_type": "incident_status_updated",
+        "incident_id": incident_id,
+        "status": status,
+        "timestamp": incident.updated_at.isoformat() if incident.updated_at else None,
+    })
+
+    return _incident_to_response(incident)
+
+
 @router.get("/{incident_id}/timeline", response_model=list[TimelineEventResponse])
 async def get_timeline(
     incident_id: str,
