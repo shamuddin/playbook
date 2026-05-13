@@ -183,6 +183,7 @@ async def list_incidents(
     status: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, description="Free-text search"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -196,6 +197,12 @@ async def list_incidents(
         query = query.where(Incident.severity == severity)
     if category:
         query = query.where(Incident.category == category)
+    if q:
+        query = query.where(
+            (Incident.incident_id.ilike(f"%{q}%"))
+            | (Incident.incident_type.ilike(f"%{q}%"))
+            | (Incident.event_id.ilike(f"%{q}%"))
+        )
 
     # Get total count
     count_query = select(Incident.id).select_from(Incident)
@@ -205,6 +212,12 @@ async def list_incidents(
         count_query = count_query.where(Incident.severity == severity)
     if category:
         count_query = count_query.where(Incident.category == category)
+    if q:
+        count_query = count_query.where(
+            (Incident.incident_id.ilike(f"%{q}%"))
+            | (Incident.incident_type.ilike(f"%{q}%"))
+            | (Incident.event_id.ilike(f"%{q}%"))
+        )
     count_result = await db.execute(count_query)
     total = len(count_result.scalars().all())
 

@@ -59,6 +59,7 @@ class IncidentResponse(IncidentBase):
 
     id: str
     incident_id: str
+    event_id: Optional[str] = None
     status: str
     playbook_id: Optional[str] = None
     response_status: str

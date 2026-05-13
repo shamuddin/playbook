@@ -19,16 +19,13 @@ interface Incident {
   id: string
   incident_id: string
   incident_type: string
-  incident_type_name: string
   severity: string
   status: string
   category: string
-  agent_id: string
+  event_id: string | null
   confidence: number
   judge_verdict: string | null
   bypass_detected: boolean
-  description: string
-  metadata: Record<string, any>
   created_at: string
   updated_at: string
 }
@@ -44,11 +41,15 @@ interface TimelineEvent {
 }
 
 interface ForensicsData {
-  evidence_id: string
+  package_id: string
   incident_id: string
-  package_status: string
+  package_type: string
+  is_verified: boolean
   integrity_hash: string
-  artifacts: Record<string, any>
+  artifacts: string[]
+  manifest: Record<string, any>
+  signature: Record<string, any>
+  generated_at: string | null
 }
 
 export default function IncidentDetailPage() {
@@ -144,9 +145,9 @@ export default function IncidentDetailPage() {
               <span className="text-xs text-gray-500 font-mono">{incident.incident_id}</span>
             </div>
             <h1 className="text-xl font-bold text-gray-900">
-              {incident.incident_type_name || incident.incident_type}
+              {incident.incident_type}
             </h1>
-            <p className="text-sm text-gray-600 mt-1">{incident.description || 'No description'}</p>
+            <p className="text-sm text-gray-600 mt-1">Event: {incident.event_id || 'Unknown'}</p>
           </div>
           <div className="text-right">
             <div className="flex items-center gap-2 justify-end">
@@ -168,7 +169,7 @@ export default function IncidentDetailPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Status" value={incident.status} />
         <StatCard label="Category" value={incident.category || '—'} />
-        <StatCard label="Agent" value={incident.agent_id} />
+        <StatCard label="Agent" value={incident.event_id || '—'} />
         <StatCard label="Confidence" value={`${(incident.confidence * 100).toFixed(0)}%`} />
       </div>
 
@@ -224,12 +225,12 @@ export default function IncidentDetailPage() {
             {forensics ? (
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Evidence ID</span>
-                  <span className="font-mono text-gray-900">{forensics.evidence_id}</span>
+                  <span className="text-gray-500">Package ID</span>
+                  <span className="font-mono text-gray-900">{forensics.package_id}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Status</span>
-                  <span className="text-gray-900">{forensics.package_status}</span>
+                  <span className="text-gray-500">Type</span>
+                  <span className="text-gray-900">{forensics.package_type}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Integrity</span>
@@ -237,10 +238,13 @@ export default function IncidentDetailPage() {
                     {forensics.integrity_hash}
                   </span>
                 </div>
-                {forensics.artifacts && Object.keys(forensics.artifacts).length > 0 && (
-                  <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">
-                    {JSON.stringify(forensics.artifacts, null, 2)}
-                  </pre>
+                {forensics.artifacts && forensics.artifacts.length > 0 && (
+                  <div className="text-xs bg-gray-50 p-2 rounded">
+                    <p className="font-medium text-gray-700 mb-1">Artifacts:</p>
+                    <ul className="list-disc list-inside">
+                      {forensics.artifacts.map((a, i) => <li key={i}>{a}</li>)}
+                    </ul>
+                  </div>
                 )}
               </div>
             ) : (
@@ -250,13 +254,7 @@ export default function IncidentDetailPage() {
 
           <div className="card p-4">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Metadata</h2>
-            {incident.metadata && Object.keys(incident.metadata).length > 0 ? (
-              <pre className="text-xs bg-gray-50 p-2 rounded overflow-x-auto">
-                {JSON.stringify(incident.metadata, null, 2)}
-              </pre>
-            ) : (
-              <p className="text-sm text-gray-500">No metadata</p>
-            )}
+            <p className="text-sm text-gray-500">Metadata available via forensics package</p>
           </div>
         </div>
       </div>

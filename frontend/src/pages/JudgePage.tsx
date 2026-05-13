@@ -39,10 +39,10 @@ interface BypassAttempt {
 }
 
 const BYPASS_DESCRIPTIONS: Record<string, string> = {
-  'context_window_displacement': 'Inject 50,000+ benign tokens before a malicious payload, pushing it into the "lost in the middle" region.',
-  'unicode_homoglyph': 'Replace ASCII characters with visually identical Unicode homoglyphs to evade string-based detection.',
-  'adversarial_suffix_injection': 'Append crafted suffixes that exploit LLM token boundaries to bypass filters.',
-  'multi_turn_state_confusion': 'Sequence of seemingly innocent queries that collectively manipulate agent state.',
+  'Context Window Displacement': 'Inject 50,000+ benign tokens before a malicious payload, pushing it into the "lost in the middle" region. LLM judges fail; deterministic metadata catches it.',
+  'Unicode Homoglyph Substitution': 'Replace ASCII characters with visually identical Unicode homoglyphs to evade string-based detection. NFKC normalization catches it.',
+  'Indirect Tool Chaining': 'Split a malicious operation across multiple tool calls to evade per-call safety checks. Composite pattern detection catches it.',
+  'Confidence Hijacking': 'Manipulate model confidence or claim authority to bypass safety checks. Binary enforcement ignores confidence.',
 }
 
 export default function JudgePage() {

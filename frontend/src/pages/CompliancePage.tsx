@@ -20,13 +20,17 @@ interface Mapping {
 
 interface GapAnalysis {
   framework: string
-  total_controls: number
-  mapped_controls: number
-  coverage_percent: number
-  gaps: Array<{
-    control_id: string
-    control_name: string
-    reason: string
+  total_incident_types: number
+  covered_types: number
+  coverage_percentage: number
+  critical_gaps: Array<{
+    incident_type: string
+    name: string
+    missing_controls: number
+  }>
+  uncovered: Array<{
+    incident_type: string
+    name: string
   }>
 }
 
@@ -130,30 +134,30 @@ export default function CompliancePage() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="text-xs text-gray-500">Total Controls</p>
-              <p className="text-xl font-bold text-gray-900">{gapAnalysis.total_controls}</p>
+              <p className="text-xs text-gray-500">Total Incident Types</p>
+              <p className="text-xl font-bold text-gray-900">{gapAnalysis.total_incident_types}</p>
             </div>
             <div className="p-3 bg-green-50 rounded-lg">
-              <p className="text-xs text-gray-500">Mapped Controls</p>
-              <p className="text-xl font-bold text-green-700">{gapAnalysis.mapped_controls}</p>
+              <p className="text-xs text-gray-500">Covered Types</p>
+              <p className="text-xl font-bold text-green-700">{gapAnalysis.covered_types}</p>
             </div>
             <div className="p-3 bg-blue-50 rounded-lg">
               <p className="text-xs text-gray-500">Coverage</p>
-              <p className="text-xl font-bold text-blue-700">{gapAnalysis.coverage_percent?.toFixed(1) || 0}%</p>
+              <p className="text-xl font-bold text-blue-700">{gapAnalysis.coverage_percentage?.toFixed(1) || 0}%</p>
             </div>
           </div>
-          {gapAnalysis.gaps && gapAnalysis.gaps.length > 0 && (
+          {gapAnalysis.critical_gaps && gapAnalysis.critical_gaps.length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-orange-500" />
-                Gaps ({gapAnalysis.gaps.length})
+                Critical Gaps ({gapAnalysis.critical_gaps.length})
               </h3>
               <div className="space-y-2">
-                {gapAnalysis.gaps.map((gap, i) => (
+                {gapAnalysis.critical_gaps.map((gap, i) => (
                   <div key={i} className="flex items-start gap-2 p-2 bg-orange-50 rounded text-sm">
-                    <span className="font-mono text-xs text-orange-700">{gap.control_id}</span>
-                    <span className="text-gray-700">{gap.control_name}</span>
-                    <span className="text-xs text-gray-500 ml-auto">{gap.reason}</span>
+                    <span className="font-mono text-xs text-orange-700">{gap.incident_type}</span>
+                    <span className="text-gray-700">{gap.name}</span>
+                    <span className="text-xs text-gray-500 ml-auto">{gap.missing_controls} missing</span>
                   </div>
                 ))}
               </div>

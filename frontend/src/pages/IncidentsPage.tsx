@@ -10,7 +10,7 @@ interface Incident {
   incident_type: string
   severity: string
   status: string
-  agent_id: string
+  event_id: string | null
   confidence: number
   judge_verdict: string | null
   bypass_detected: boolean
@@ -181,7 +181,7 @@ export default function IncidentsPage() {
                         {inc.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{inc.agent_id}</td>
+                    <td className="px-4 py-3 text-gray-600">{inc.event_id || '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{(inc.confidence * 100).toFixed(0)}%</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">

@@ -19,8 +19,11 @@ interface Agent {
   incident_count: number
   bypass_attempt_count: number
   judge_decision_count: number
+  judge_decision_rate: number
   suprawall_connected: boolean
   is_active: boolean
+  status: string
+  last_seen: string
   created_at: string
   updated_at: string
 }
@@ -119,7 +122,13 @@ export default function AgentHealthPage() {
                 Bypasses
               </th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">
+                Decision Rate
+              </th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">
                 Status
+              </th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">
+                Last Seen
               </th>
             </tr>
           </thead>
@@ -180,20 +189,26 @@ export default function AgentHealthPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
+                  <span className="text-sm text-gray-700">
+                    {(agent.judge_decision_rate * 100).toFixed(0)}%
+                  </span>
+                </td>
+                <td className="px-4 py-3">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      agent.health_score >= 80
+                      agent.status === 'healthy'
                         ? 'bg-green-100 text-green-700'
-                        : agent.health_score >= 50
+                        : agent.status === 'degraded'
                         ? 'bg-yellow-100 text-yellow-700'
                         : 'bg-red-100 text-red-700'
                     }`}
                   >
-                    {agent.health_score >= 80
-                      ? 'Healthy'
-                      : agent.health_score >= 50
-                      ? 'Degraded'
-                      : 'Critical'}
+                    {agent.status ? agent.status.charAt(0).toUpperCase() + agent.status.slice(1) : 'Unknown'}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="text-xs text-gray-500">
+                    {agent.last_seen ? new Date(agent.last_seen).toLocaleDateString() : '—'}
                   </span>
                 </td>
               </tr>
