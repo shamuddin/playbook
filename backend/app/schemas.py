@@ -250,6 +250,124 @@ class PolicyVersionResponse(BaseModel):
     created_at: datetime
 
 
+class ODPEntryResponse(BaseModel):
+    """Structured ODP entry with override tracking."""
+    value: str
+    is_override: bool = False
+    nist_default: Optional[str] = None
+    value_type: str = "string"
+
+
+class ODPsForTypeResponse(BaseModel):
+    """Full ODP response for an incident type per API spec."""
+    incident_type: str
+    incident_name: Optional[str] = None
+    odp_count: int = 0
+    version: str = "1.0"
+    odps: Dict[str, ODPEntryResponse] = Field(default_factory=dict)
+    conflicts_detected: int = 0
+    last_updated: Optional[datetime] = None
+    updated_by: Optional[str] = None
+
+
+class ODPsUpdateBody(BaseModel):
+    """Request body for updating multiple ODPs at once."""
+    odps: Dict[str, str] = Field(default_factory=dict)
+    skip_validation: bool = False
+
+
+class ODPsUpdateResponse(BaseModel):
+    """Response from multi-ODP update."""
+    incident_type: str
+    odps_applied: int
+    conflicts_detected: int
+    version: int
+    resolved_policy: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ConflictDetail(BaseModel):
+    """Single conflict detail within validation results."""
+    type: str
+    severity: str
+    message: str
+    nist_value: Optional[str] = None
+    odp_value: Optional[str] = None
+    suggestion: Optional[str] = None
+
+
+class ValidationResult(BaseModel):
+    """Per-incident-type validation result."""
+    incident_type: str
+    valid: bool
+    conflicts: List[ConflictDetail] = Field(default_factory=list)
+
+
+class ValidateResponse(BaseModel):
+    """Full validation response."""
+    valid: bool
+    total_validated: int
+    total_conflicts: int
+    results: List[ValidationResult] = Field(default_factory=list)
+
+
+class TemplateApplyBody(BaseModel):
+    """Request body for applying a template."""
+    incident_types: Optional[List[str]] = None
+    overwrite_existing: bool = True
+    dry_run: bool = False
+
+
+class TemplateApplyResult(BaseModel):
+    """Per-incident-type template application result."""
+    incident_type: str
+    odps_applied: int
+    odps_skipped: int
+    conflicts_detected: int
+    version: int
+
+
+class TemplateApplyResponse(BaseModel):
+    """Full template apply response."""
+    template_id: str
+    dry_run: bool
+    results: List[TemplateApplyResult] = Field(default_factory=list)
+    total_applied: int
+    total_conflicts: int
+
+
+class RollbackBody(BaseModel):
+    """Request body for rollback."""
+    description: Optional[str] = None
+    dry_run: bool = False
+
+
+class RollbackResponse(BaseModel):
+    """Full rollback response."""
+    rolled_back_from: int
+    rolled_back_to: int
+    new_version: int
+    description: Optional[str] = None
+    changes: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ConflictResolveBody(BaseModel):
+    """Request body for resolving a conflict."""
+    resolution: str = "accept_suggestion"
+    custom_value: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ConflictResolveResponse(BaseModel):
+    """Full conflict resolution response."""
+    conflict_id: str
+    status: str
+    resolution: str
+    previous_value: Optional[str] = None
+    new_value: Optional[str] = None
+    note: Optional[str] = None
+    resolved_by: Optional[str] = None
+
+
 # ============================================================================
 # Forensics
 # ============================================================================
@@ -310,12 +428,30 @@ class ComplianceMappingResponse(BaseModel):
 # ============================================================================
 
 class DemoSeedRequest(BaseModel):
-    scenario_ids: Optional[List[str]] = None
+    scenario: str = "default"
+    agent_count: int = 5
+    incident_count: int = 25
+    clear_existing: bool = True
+    include_judge_decisions: bool = True
+    include_bypass_attempts: bool = True
 
 
 class DemoSeedResponse(BaseModel):
-    scenarios_seeded: int
-    incidents_created: int
+    success: bool = True
+    message: str = "Demo data seeded successfully"
+    scenario: str = "default"
+    seeded: Dict[str, int] = Field(default_factory=dict)
+    clear_existing: bool = True
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DemoTriggerRequest(BaseModel):
+    scenario: str
+    target_agent_id: Optional[str] = None
+    severity: Optional[str] = None
+    auto_classify: bool = True
+    auto_respond: bool = True
+    delay_seconds: int = 0
 
 
 # ============================================================================

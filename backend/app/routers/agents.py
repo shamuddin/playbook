@@ -60,26 +60,36 @@ async def list_agents(
     result = await db.execute(query)
     agents = result.scalars().all()
 
+    def _agent_status(agent: Agent) -> str:
+        if agent.health_score >= 80:
+            return "healthy"
+        elif agent.health_score >= 50:
+            return "degraded"
+        return "critical"
+
+    def _agent_dict(agent: Agent) -> dict:
+        return {
+            "id": agent.id,
+            "system_id": agent.system_id,
+            "name": agent.name,
+            "description": agent.description,
+            "health_score": agent.health_score,
+            "lie_rate": agent.lie_rate,
+            "incident_count": agent.incident_count,
+            "bypass_attempt_count": agent.bypass_attempt_count,
+            "judge_decision_count": agent.judge_decision_count,
+            "judge_decision_rate": round(agent.judge_decision_count / max(agent.incident_count, 1), 3),
+            "suprawall_connected": agent.suprawall_connected,
+            "is_active": agent.is_active,
+            "status": _agent_status(agent),
+            "last_seen": agent.updated_at.isoformat() if agent.updated_at else None,
+            "created_at": agent.created_at.isoformat() if agent.created_at else None,
+            "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
+        }
+
     return StandardResponse(
         data={
-            "items": [
-                {
-                    "id": agent.id,
-                    "system_id": agent.system_id,
-                    "name": agent.name,
-                    "description": agent.description,
-                    "health_score": agent.health_score,
-                    "lie_rate": agent.lie_rate,
-                    "incident_count": agent.incident_count,
-                    "bypass_attempt_count": agent.bypass_attempt_count,
-                    "judge_decision_count": agent.judge_decision_count,
-                    "suprawall_connected": agent.suprawall_connected,
-                    "is_active": agent.is_active,
-                    "created_at": agent.created_at.isoformat() if agent.created_at else None,
-                    "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
-                }
-                for agent in agents
-            ],
+            "items": [_agent_dict(agent) for agent in agents],
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -109,6 +119,8 @@ async def get_agent(
     )
     incident_count = incident_result.scalar() or 0
 
+    status_str = "healthy" if agent.health_score >= 80 else "degraded" if agent.health_score >= 50 else "critical"
+
     return StandardResponse(
         data={
             "id": agent.id,
@@ -120,8 +132,11 @@ async def get_agent(
             "incident_count": incident_count,
             "bypass_attempt_count": agent.bypass_attempt_count,
             "judge_decision_count": agent.judge_decision_count,
+            "judge_decision_rate": round(agent.judge_decision_count / max(agent.incident_count, 1), 3),
             "suprawall_connected": agent.suprawall_connected,
             "is_active": agent.is_active,
+            "status": status_str,
+            "last_seen": agent.updated_at.isoformat() if agent.updated_at else None,
             "created_at": agent.created_at.isoformat() if agent.created_at else None,
             "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
         },
@@ -161,6 +176,11 @@ async def get_agent_health(
     else:
         status_str = "critical"
 
+    # Component breakdown
+    availability = max(0, 100 - (agent.incident_count * 3))
+    response_quality = max(0, 100 - int(agent.lie_rate * 100))
+    compliance = max(0, 100 - (agent.bypass_attempt_count * 20))
+
     return StandardResponse(
         data={
             "agent_id": agent_id,
@@ -171,7 +191,14 @@ async def get_agent_health(
             "status": status_str,
             "incident_count": agent.incident_count,
             "bypass_attempt_count": agent.bypass_attempt_count,
-            "trend": "stable",  # Would compute from history
+            "judge_decision_count": agent.judge_decision_count,
+            "judge_decision_rate": round(agent.judge_decision_count / max(agent.incident_count, 1), 3),
+            "components": {
+                "availability": availability,
+                "response_quality": response_quality,
+                "compliance": compliance,
+            },
+            "trend": "stable",
         },
         message="Agent health retrieved",
     )
@@ -180,7 +207,8 @@ async def get_agent_health(
 @router.get("/{agent_id}/trends", response_model=StandardResponse)
 async def get_agent_trends(
     agent_id: str,
-    days: int = Query(7, ge=1, le=90, description="Number of days to look back"),
+    period: str = Query("7d", description="Time period: 1h, 6h, 24h, 7d, 30d, 90d"),
+    granularity: str = Query("daily", description="Granularity: hourly, daily"),
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse:
     """Get health trend data for an agent over time."""
@@ -192,6 +220,10 @@ async def get_agent_trends(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
         )
+
+    # Parse period to days
+    period_map = {"1h": 1, "6h": 1, "24h": 1, "7d": 7, "30d": 30, "90d": 90}
+    days = period_map.get(period, 7)
 
     # Get health history
     history_result = await db.execute(
@@ -213,6 +245,8 @@ async def get_agent_trends(
                     "date": (datetime.now(timezone.utc) - timedelta(days=days - i)).date().isoformat(),
                     "health_score": max(0, min(100, base_score + (i - days // 2) * 2)),
                     "lie_rate": max(0.0, agent.lie_rate + (i - days // 2) * 0.001),
+                    "incident_count": max(0, agent.incident_count // max(days, 1) + (i - days // 2)),
+                    "bypass_attempt_count": max(0, agent.bypass_attempt_count // max(days, 1) + (i - days // 2) // 3),
                 }
             )
     else:
@@ -221,6 +255,8 @@ async def get_agent_trends(
                 "date": h.recorded_at.date().isoformat() if h.recorded_at else None,
                 "health_score": h.health_score,
                 "lie_rate": h.lie_rate,
+                "incident_count": getattr(h, "incident_count", 0),
+                "bypass_attempt_count": getattr(h, "bypass_attempt_count", 0),
             }
             for h in history
         ]
@@ -228,8 +264,15 @@ async def get_agent_trends(
     return StandardResponse(
         data={
             "agent_id": agent_id,
-            "days": days,
+            "period": period,
+            "granularity": granularity,
             "trend": history,
+            "metrics": {
+                "avg_health": round(sum(h["health_score"] for h in history) / max(len(history), 1), 1),
+                "avg_lie_rate": round(sum(h["lie_rate"] for h in history) / max(len(history), 1), 3),
+                "min_health": min((h["health_score"] for h in history), default=agent.health_score),
+                "max_health": max((h["health_score"] for h in history), default=agent.health_score),
+            },
         },
         message="Agent trends retrieved",
     )

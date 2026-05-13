@@ -291,8 +291,9 @@ class TestIncidentEndpoints:
         response = await async_client.get("/api/v1/policy-builder/nist-baseline")
         assert response.status_code == 200
         data = response.json()["data"]
-        assert isinstance(data, list)
-        assert len(data) > 0
+        assert isinstance(data, dict)
+        assert "items" in data
+        assert len(data["items"]) > 0
 
     async def test_policy_builder_templates(self, seeded_async_client: AsyncClient):
         async_client = seeded_async_client
@@ -308,7 +309,7 @@ class TestIncidentEndpoints:
         """Test policy builder resolved policy endpoint."""
         response = await async_client.get("/api/v1/policy-builder/resolve/AGT-DEL-001")
         assert response.status_code == 200
-        data = response.json()
+        data = response.json()["data"]
         assert data["incident_type"] == "AGT-DEL-001"
         assert "baseline" in data
         assert "effective_policy" in data
