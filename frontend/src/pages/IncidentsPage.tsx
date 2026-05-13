@@ -1,12 +1,242 @@
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { AlertTriangle, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+
+interface Incident {
+  id: string
+  incident_id: string
+  incident_type: string
+  severity: string
+  status: string
+  agent_id: string
+  confidence: number
+  judge_verdict: string | null
+  bypass_detected: boolean
+  created_at: string
+}
+
 export default function IncidentsPage() {
+  const navigate = useNavigate()
+  const [incidents, setIncidents] = useState<Incident[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [severityFilter, setSeverityFilter] = useState('')
+
+  useEffect(() => {
+    fetchIncidents()
+  }, [page, statusFilter, severityFilter])
+
+  const fetchIncidents = async () => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    params.set('page_size', String(pageSize))
+    if (statusFilter) params.set('status', statusFilter)
+    if (severityFilter) params.set('severity', severityFilter)
+    if (search) params.set('q', search)
+
+    try {
+      const res = await fetch(`${API_BASE}/incidents?${params.toString()}`)
+      const data = await res.json()
+      setIncidents(data.data || [])
+      setTotal(data.total || 0)
+    } catch {
+      setIncidents([])
+      setTotal(0)
+    }
+    setLoading(false)
+  }
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    setPage(1)
+    fetchIncidents()
+  }
+
+  const severityBadge = (severity: string) => {
+    const map: Record<string, string> = {
+      critical: 'bg-red-100 text-red-700',
+      high: 'bg-orange-100 text-orange-700',
+      medium: 'bg-yellow-100 text-yellow-700',
+      low: 'bg-green-100 text-green-700',
+    }
+    return map[severity] || 'bg-gray-100 text-gray-700'
+  }
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      new: 'bg-blue-100 text-blue-700',
+      detected: 'bg-purple-100 text-purple-700',
+      responding: 'bg-amber-100 text-amber-700',
+      resolved: 'bg-green-100 text-green-700',
+      escalated: 'bg-red-100 text-red-700',
+    }
+    return map[status] || 'bg-gray-100 text-gray-700'
+  }
+
+  const totalPages = Math.ceil(total / pageSize)
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Incidents</h1>
-        <button className="btn-primary">Create Incident</button>
       </div>
-      <div className="card">
-        <p className="text-gray-500">Incident table will be implemented here.</p>
+
+      {/* Filters */}
+      <div className="card p-4">
+        <form onSubmit={handleSearch} className="flex flex-wrap gap-3 items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-medium text-gray-500 mb-1">Search</label>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Incident ID, type, agent..."
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All</option>
+              <option value="new">New</option>
+              <option value="detected">Detected</option>
+              <option value="responding">Responding</option>
+              <option value="resolved">Resolved</option>
+              <option value="escalated">Escalated</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Severity</label>
+            <select
+              value={severityFilter}
+              onChange={(e) => { setSeverityFilter(e.target.value); setPage(1) }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <button type="submit" className="btn-primary py-2 px-4">
+            <Filter className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
+
+      {/* Table */}
+      <div className="card overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        ) : incidents.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">No incidents found</div>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">ID</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Severity</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Agent</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Confidence</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Judge</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Created</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {incidents.map((inc) => (
+                  <tr
+                    key={inc.id}
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => navigate(`/incidents/${inc.incident_id}`)}
+                  >
+                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{inc.incident_id}</td>
+                    <td className="px-4 py-3 text-gray-900">{inc.incident_type}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${severityBadge(inc.severity)}`}>
+                        {inc.severity}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadge(inc.status)}`}>
+                        {inc.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{inc.agent_id}</td>
+                    <td className="px-4 py-3 text-gray-600">{(inc.confidence * 100).toFixed(0)}%</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        {inc.bypass_detected && (
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                        )}
+                        {inc.judge_verdict ? (
+                          <span className={`text-xs font-medium ${
+                            inc.judge_verdict === 'ALLOW' ? 'text-green-600' :
+                            inc.judge_verdict === 'DENY' ? 'text-red-600' :
+                            inc.judge_verdict === 'QUARANTINE' ? 'text-orange-600' :
+                            'text-purple-600'
+                          }`}>
+                            {inc.judge_verdict}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      {new Date(inc.created_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+              <span className="text-xs text-gray-500">
+                Showing {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)} of {total}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs text-gray-600">
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-30"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
