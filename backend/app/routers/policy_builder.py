@@ -20,6 +20,7 @@ from app.models import (
     OrganizationODP,
     PolicyVersion,
 )
+from app.policy import BaselineLoader, ConflictDetector, ODPResolver
 from app.schemas import (
     ConflictDetail,
     ConflictResolveBody,
@@ -285,6 +286,73 @@ async def get_odps_for_type(
     )
 
 
+@router.put("/odps/bulk")
+async def bulk_update_odps(
+    updates: Dict[str, Dict[str, str]],
+    skip_validation: bool = False,
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Bulk update ODPs across multiple incident types.
+
+    updates: {incident_type: {odp_key: odp_value, ...}, ...}
+    """
+    total_applied = 0
+    total_conflicts = 0
+
+    for incident_type, odps in updates.items():
+        baseline_result = await db.execute(
+            select(NistBaseline).where(NistBaseline.incident_type == incident_type)
+        )
+        baseline = baseline_result.scalar_one_or_none()
+        if not baseline:
+            continue
+
+        for key, value in odps.items():
+            result = await db.execute(
+                select(OrganizationODP).where(
+                    OrganizationODP.baseline_id == baseline.id,
+                    OrganizationODP.odp_key == key,
+                )
+            )
+            odp = result.scalar_one_or_none()
+            if odp is None:
+                odp = OrganizationODP(
+                    baseline_id=baseline.id,
+                    odp_key=key,
+                    odp_value=value,
+                    value_type="string",
+                )
+                db.add(odp)
+            else:
+                version = PolicyVersion(
+                    version_number=await _get_next_version(db),
+                    baseline_id=baseline.id,
+                    odp_id=odp.id,
+                    changed_by="system",
+                    change_type="bulk_update",
+                    from_value=odp.odp_value,
+                    to_value=value,
+                    change_reason=f"Bulk update: {key}",
+                )
+                db.add(version)
+                odp.odp_value = value
+            total_applied += 1
+
+        if not skip_validation:
+            total_conflicts += await _validate_baseline(db, baseline)
+
+    await db.commit()
+
+    return StandardResponse(
+        message=f"Bulk update complete. {total_applied} ODPs updated, {total_conflicts} conflicts detected.",
+        data={"applied": total_applied, "conflicts": total_conflicts},
+    )
+
+
+# ============================================================================
+# Validation
+# ============================================================================
+
 @router.put("/odps/{incident_type}")
 async def update_odp(
     incident_type: str,
@@ -368,73 +436,6 @@ async def update_odp(
         message=f"Updated {applied} ODPs for {incident_type}",
     )
 
-
-@router.put("/odps/bulk")
-async def bulk_update_odps(
-    updates: Dict[str, Dict[str, str]],
-    skip_validation: bool = False,
-    db: AsyncSession = Depends(get_db),
-) -> StandardResponse:
-    """Bulk update ODPs across multiple incident types.
-
-    updates: {incident_type: {odp_key: odp_value, ...}, ...}
-    """
-    total_applied = 0
-    total_conflicts = 0
-
-    for incident_type, odps in updates.items():
-        baseline_result = await db.execute(
-            select(NistBaseline).where(NistBaseline.incident_type == incident_type)
-        )
-        baseline = baseline_result.scalar_one_or_none()
-        if not baseline:
-            continue
-
-        for key, value in odps.items():
-            result = await db.execute(
-                select(OrganizationODP).where(
-                    OrganizationODP.baseline_id == baseline.id,
-                    OrganizationODP.odp_key == key,
-                )
-            )
-            odp = result.scalar_one_or_none()
-            if odp is None:
-                odp = OrganizationODP(
-                    baseline_id=baseline.id,
-                    odp_key=key,
-                    odp_value=value,
-                    value_type="string",
-                )
-                db.add(odp)
-            else:
-                version = PolicyVersion(
-                    version_number=await _get_next_version(db),
-                    baseline_id=baseline.id,
-                    odp_id=odp.id,
-                    changed_by="system",
-                    change_type="bulk_update",
-                    from_value=odp.odp_value,
-                    to_value=value,
-                    change_reason=f"Bulk update: {key}",
-                )
-                db.add(version)
-                odp.odp_value = value
-            total_applied += 1
-
-        if not skip_validation:
-            total_conflicts += await _validate_baseline(db, baseline)
-
-    await db.commit()
-
-    return StandardResponse(
-        message=f"Bulk update complete. {total_applied} ODPs updated, {total_conflicts} conflicts detected.",
-        data={"applied": total_applied, "conflicts": total_conflicts},
-    )
-
-
-# ============================================================================
-# Validation
-# ============================================================================
 
 @router.post("/validate")
 async def validate_odps(
@@ -558,9 +559,9 @@ async def validate_odps(
 
         # Persist conflicts if validating existing (not dry-run)
         if body is None:
-            for cd in conflicts:
+            for i, cd in enumerate(conflicts):
                 conflict = ODPConflict(
-                    conflict_id=f"CONF-{baseline.incident_type}-{cd.type}-{len(conflicts)}",
+                    conflict_id=f"CONF-{baseline.incident_type}-{cd.type}-{i}",
                     baseline_id=baseline.id,
                     odp_id="",
                     conflict_type=cd.type,

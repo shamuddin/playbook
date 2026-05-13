@@ -190,3 +190,190 @@ class TestJudgeEngine:
         # If auto_contain is enabled and severity >= 7, should be QUARANTINE
         if result.severity_score >= 7:
             assert result.verdict != JudgeVerdict.ALLOW
+
+
+# ============================================================================
+# Policy Builder Unit Tests (Phase 8)
+# ============================================================================
+
+import pytest
+
+from app.policy.baseline_loader import BaselineLoader
+from app.policy.conflict_detector import ConflictDetector
+from app.policy.odp_resolver import ODPResolver
+
+
+class TestODPResolver:
+    """Unit tests for ODP resolution and type coercion."""
+
+    def test_coerce_bool_true(self):
+        assert ODPResolver.coerce_value("auto_contain_enabled", "true") is True
+        assert ODPResolver.coerce_value("auto_contain_enabled", "TRUE") is True
+
+    def test_coerce_bool_false(self):
+        assert ODPResolver.coerce_value("auto_contain_enabled", "false") is False
+        assert ODPResolver.coerce_value("compliance_report", "FALSE") is False
+
+    def test_coerce_int(self):
+        assert ODPResolver.coerce_value("response_time_sla_seconds", "1800") == 1800
+        assert ODPResolver.coerce_value("record_threshold", "10") == 10
+
+    def test_coerce_int_invalid_fallback(self):
+        assert ODPResolver.coerce_value("response_time_sla_seconds", "abc") == "abc"
+
+    def test_coerce_list_json(self):
+        result = ODPResolver.coerce_value("escalation_contacts", '["a@b.com", "c@d.com"]')
+        assert result == ["a@b.com", "c@d.com"]
+
+    def test_coerce_list_csv(self):
+        result = ODPResolver.coerce_value("notify_targets", "#security, #incident")
+        assert result == ["#security", "#incident"]
+
+    def test_coerce_string_fallback(self):
+        assert ODPResolver.coerce_value("severity_threshold", "HIGH") == "HIGH"
+
+    def test_build_effective_policy_no_odps(self, baseline_fixture):
+        """Baseline values should pass through when no ODPs exist."""
+        effective = ODPResolver.build_effective_policy(baseline_fixture, [])
+        assert effective["severity_threshold"] == "CRITICAL"
+        assert effective["auto_contain_enabled"] is True
+        assert effective["response_time_sla_seconds"] == 1800
+
+    def test_build_effective_policy_with_override(self, baseline_fixture, odp_fixture_factory):
+        """ODP overrides should replace baseline values."""
+        odps = [
+            odp_fixture_factory("severity_threshold", "HIGH"),
+            odp_fixture_factory("auto_contain_enabled", "false"),
+            odp_fixture_factory("response_time_sla", "3600"),
+        ]
+        effective = ODPResolver.build_effective_policy(baseline_fixture, odps)
+        assert effective["severity_threshold"] == "HIGH"
+        assert effective["auto_contain_enabled"] is False
+        # ODP key "response_time_sla" maps to "response_time_sla_seconds"
+        assert effective["response_time_sla_seconds"] == 3600
+
+    def test_get_defaults(self, baseline_fixture):
+        defaults = ODPResolver.get_defaults(baseline_fixture)
+        assert defaults["severity_threshold"] == "CRITICAL"
+        assert defaults["auto_contain_enabled"] == "true"
+        assert defaults["response_time_sla"] == "1800"
+
+
+class TestConflictDetector:
+    """Unit tests for the 7 conflict detection rules."""
+
+    def test_missing_required(self, baseline_fixture):
+        odps = {}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        missing = [c for c in conflicts if c.type == "MISSING_REQUIRED"]
+        assert len(missing) == 8  # All 8 required keys missing
+
+    def test_severity_downgrade(self, baseline_fixture):
+        odps = {"severity_threshold": "LOW"}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        sev = [c for c in conflicts if c.type == "SEVERITY_DOWNGRADE"]
+        assert len(sev) == 1
+        assert sev[0].severity == "BLOCKED"
+
+    def test_no_severity_downgrade_when_equal(self, baseline_fixture):
+        odps = {"severity_threshold": "CRITICAL"}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        sev = [c for c in conflicts if c.type == "SEVERITY_DOWNGRADE"]
+        assert len(sev) == 0
+
+    def test_auto_contain_mismatch(self, baseline_fixture):
+        odps = {"auto_contain_enabled": "false"}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        mismatch = [c for c in conflicts if c.type == "VALUE_MISMATCH"]
+        assert len(mismatch) == 1
+        assert mismatch[0].severity == "WARNING"
+
+    def test_sla_threshold_violation(self, baseline_fixture):
+        """SLA > 2x baseline (1800*2=3600) should trigger warning."""
+        odps = {"response_time_sla": "4000"}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        violations = [c for c in conflicts if c.type == "THRESHOLD_VIOLATION"]
+        assert len(violations) == 1
+
+    def test_forensic_level_reduction(self, baseline_fixture):
+        odps = {"forensic_level": "none"}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        reductions = [c for c in conflicts if c.type == "FORENSIC_LEVEL_REDUCTION"]
+        assert len(reductions) == 1
+
+    def test_compliance_report_disabled(self, baseline_fixture):
+        odps = {"compliance_report": "false"}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        disabled = [c for c in conflicts if c.type == "COMPLIANCE_REPORT_DISABLED"]
+        assert len(disabled) == 1
+
+    def test_empty_escalation_contacts(self, baseline_fixture):
+        odps = {"escalation_contacts": ""}
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        empty = [c for c in conflicts if c.type == "MISSING_REQUIRED" and "contact" in c.message.lower()]
+        assert len(empty) == 1
+
+    def test_no_conflicts_with_valid_odps(self, baseline_fixture):
+        odps = {
+            "severity_threshold": "CRITICAL",
+            "auto_contain_enabled": "true",
+            "escalation_contacts": '["security@example.com"]',
+            "response_time_sla": "1800",
+            "forensic_level": "deep",
+            "notify_targets": '["#alerts"]',
+            "compliance_report": "true",
+            "record_threshold": "1",
+        }
+        conflicts = ConflictDetector.detect(baseline_fixture, odps, "AGT-DEL-001")
+        assert len(conflicts) == 0
+
+
+class TestBaselineLoader:
+    """Unit tests for baseline loading utilities."""
+
+    @pytest.mark.asyncio
+    async def test_get_odp_defaults(self, baseline_fixture):
+        defaults = BaselineLoader.get_odp_defaults(baseline_fixture)
+        assert defaults["severity_threshold"] == "CRITICAL"
+        assert defaults["auto_contain_enabled"] == "true"
+        assert defaults["response_time_sla"] == "1800"
+        assert defaults["record_threshold"] == "1"
+
+
+# ============================================================================
+# Pytest fixtures for policy builder tests
+# ============================================================================
+
+@pytest.fixture
+def baseline_fixture():
+    """Return a mock NistBaseline for unit tests."""
+    from unittest.mock import MagicMock
+    baseline = MagicMock(spec="app.models.NistBaseline")
+    baseline.severity = "CRITICAL"
+    baseline.severity_threshold = "CRITICAL"
+    baseline.auto_contain_enabled = True
+    baseline.escalation_contacts = ["security@example.com"]
+    baseline.response_time_sla_seconds = 1800
+    baseline.forensic_level = "deep"
+    baseline.notify_targets = ["#security-alerts"]
+    baseline.compliance_report = True
+    baseline.record_threshold = 1
+    baseline.incident_type = "AGT-DEL-001"
+    baseline.id = "baseline-uuid-123"
+    baseline.is_active = True
+    return baseline
+
+
+@pytest.fixture
+def odp_fixture_factory():
+    """Factory for creating mock ODPs."""
+    from unittest.mock import MagicMock
+
+    def _factory(key: str, value: str):
+        odp = MagicMock(spec="app.models.OrganizationODP")
+        odp.odp_key = key
+        odp.odp_value = value
+        odp.is_active = True
+        return odp
+
+    return _factory

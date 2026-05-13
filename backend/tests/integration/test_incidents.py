@@ -313,3 +313,39 @@ class TestIncidentEndpoints:
         assert data["incident_type"] == "AGT-DEL-001"
         assert "baseline" in data
         assert "effective_policy" in data
+
+    async def test_policy_builder_odp_update(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test ODP update with validation."""
+        response = await async_client.put(
+            "/api/v1/policy-builder/odps/AGT-DEL-001",
+            json={"odps": {"severity_threshold": "HIGH", "response_time_sla": "900"}},
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["odps_applied"] == 2
+        assert "resolved_policy" in data
+
+    async def test_policy_builder_validate(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test policy validation endpoint."""
+        response = await async_client.post("/api/v1/policy-builder/validate")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "valid" in data
+        assert "total_conflicts" in data
+        assert "results" in data
+
+    async def test_policy_builder_bulk_update(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test bulk ODP update across incident types."""
+        response = await async_client.put(
+            "/api/v1/policy-builder/odps/bulk",
+            json={
+                "AGT-DEL-001": {"severity_threshold": "CRITICAL"},
+                "AGT-FIN-002": {"severity_threshold": "CRITICAL"},
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["applied"] >= 2
