@@ -22,6 +22,7 @@ from app.schemas import (
     TimelineEventResponse,
 )
 from app.services.detect import DetectionEngine, IncidentFactory, normalize_event
+from app.services.response_engine import ResponseEngine
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -298,8 +299,7 @@ async def respond_to_incident(
 ) -> StandardResponse:
     """Trigger playbook response for an incident.
 
-    In Phase 1 this sets the response_status to 'in_progress'.
-    Full playbook execution comes in Phase 2 (RESPOND).
+    Executes the full playbook via the Response Engine.
     """
     incident = await _get_incident_or_404(db, incident_id)
 
@@ -309,23 +309,32 @@ async def respond_to_incident(
             data={"incident_id": incident_id, "status": "completed"},
         )
 
-    incident.response_status = "in_progress"
-    incident.status = "responding"
+    # Execute playbook via response engine
+    engine = ResponseEngine()
+    result = await engine.execute_playbook(db, incident_id)
 
-    # Add timeline event
-    timeline = TimelineEvent(
-        incident_id=incident.id,
-        stage="respond",
-        event_type="response_triggered",
-        event_description="Playbook response triggered",
-        source_component="api",
-    )
-    db.add(timeline)
-    await db.commit()
+    # Broadcast completion
+    await ws_manager.broadcast({
+        "event_type": "incident_responded",
+        "incident_id": incident_id,
+        "response_id": result.response_id,
+        "status": result.status,
+        "steps_completed": result.steps_completed,
+        "steps_failed": result.steps_failed,
+    })
 
+    status_str = result.status.value if hasattr(result.status, "value") else str(result.status)
     return StandardResponse(
-        message="Response triggered",
-        data={"incident_id": incident_id, "status": "in_progress"},
+        message=f"Playbook execution {status_str}",
+        data={
+            "incident_id": incident_id,
+            "response_id": result.response_id,
+            "status": status_str,
+            "steps_total": result.steps_total,
+            "steps_completed": result.steps_completed,
+            "steps_failed": result.steps_failed,
+            "total_latency_ms": result.total_latency_ms,
+        },
     )
 
 

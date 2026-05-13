@@ -33,6 +33,14 @@ async def setup_database():
 
 
 @pytest_asyncio.fixture
+async def seeded_db(db_session):
+    """Seed reference data (rules, playbooks, baselines, bypass patterns)."""
+    from app.seed import seed_all
+    await seed_all(db_session)
+    yield db_session
+
+
+@pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with TestingSessionLocal() as session:
         yield session

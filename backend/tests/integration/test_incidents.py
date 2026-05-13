@@ -163,7 +163,7 @@ class TestIncidentEndpoints:
         assert len(data) >= 1
         assert data[0]["stage"] == "detect"
 
-    async def test_respond_to_incident(self, async_client: AsyncClient):
+    async def test_respond_to_incident(self, async_client: AsyncClient, seeded_db):
         create_resp = await async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-DEL-001",
             "severity": "critical",
@@ -176,7 +176,9 @@ class TestIncidentEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "in_progress" in data["message"] or "triggered" in data["message"].lower()
+        assert "playbook execution" in data["message"].lower()
+        assert data["data"]["status"] in ("completed", "partial", "failed")
+        assert data["data"]["steps_total"] > 0
 
     async def test_ingest_invalid_event(self, async_client: AsyncClient):
         response = await async_client.post("/api/v1/incidents/ingest", json={

@@ -8,12 +8,39 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DetectionRule, NistBaseline, Playbook, PlaybookAction
+from app.models import BypassPattern, DetectionRule, NistBaseline, Playbook, PlaybookAction
+from app.seed.bypass_patterns import BYPASS_PATTERNS_SEED
 from app.seed.detection_rules import DETECTION_RULES_SEED
 from app.seed.nist_baselines import NIST_BASELINES_SEED
 from app.seed.playbooks import PLAYBOOKS_SEED
 
 logger = logging.getLogger(__name__)
+
+
+async def _seed_bypass_patterns(db: AsyncSession) -> int:
+    """Seed bypass patterns if none exist."""
+    result = await db.execute(select(BypassPattern).limit(1))
+    if result.scalar_one_or_none() is not None:
+        logger.info("BypassPattern records already exist, skipping seed")
+        return 0
+
+    count = 0
+    for pattern_data in BYPASS_PATTERNS_SEED:
+        pattern = BypassPattern(
+            pattern_name=pattern_data["pattern_name"],
+            canonical_name=pattern_data["canonical_name"],
+            aliases=pattern_data["aliases"],
+            description=pattern_data["description"],
+            detection_logic=pattern_data["detection_logic"],
+            severity=pattern_data["severity"],
+            is_active=pattern_data["is_active"],
+        )
+        db.add(pattern)
+        count += 1
+
+    await db.flush()
+    logger.info(f"Seeded {count} bypass patterns")
+    return count
 
 
 async def _seed_detection_rules(db: AsyncSession) -> int:
@@ -120,6 +147,7 @@ async def seed_all(db: AsyncSession) -> dict[str, int]:
     Returns a dict of {table_name: count_seeded}.
     """
     results = {
+        "bypass_patterns": await _seed_bypass_patterns(db),
         "detection_rules": await _seed_detection_rules(db),
         "playbooks": await _seed_playbooks(db),
         "nist_baselines": await _seed_nist_baselines(db),
