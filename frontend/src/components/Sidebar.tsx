@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Shield,
+  LayoutDashboard,
   AlertTriangle,
   Gavel,
   Activity,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react'
 
 const navItems = [
+  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/incidents', label: 'Incidents', icon: AlertTriangle },
   { path: '/judge', label: 'Judge Layer', icon: Gavel },
   { path: '/agents', label: 'Agent Health', icon: Activity },
