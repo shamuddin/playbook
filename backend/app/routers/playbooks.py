@@ -121,9 +121,9 @@ async def execute_playbook(
             detail=f"Playbook {playbook_id} not found",
         )
 
-    # Execute via response engine
+    # Execute via response engine (pass playbook_id to ensure correct playbook runs)
     engine = ResponseEngine()
-    execution_result = await engine.execute_playbook(db, incident_id)
+    execution_result = await engine.execute_playbook(db, incident_id, playbook_id=playbook_id)
 
     return StandardResponse(
         message=f"Playbook execution {execution_result.status}",

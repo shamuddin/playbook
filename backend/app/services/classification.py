@@ -88,13 +88,16 @@ class ClassificationBridge:
         # Regulatory tags
         regulatory_tags = _REGULATORY_TAGS.get(incident_type, [])
 
-        # Build judge input from metadata
+        # Build judge input from metadata (23 fields)
         judge_input = {
             "incident_type": incident_type,
+            "incident_type_name": incident_type_name,
             "severity": severity,
             "confidence": confidence,
+            "category": category,
             "action": metadata.get("action", "unknown"),
             "agent_id": metadata.get("agent_id", "unknown"),
+            "session_id": metadata.get("session_id", ""),
             "auth_present": metadata.get("auth_present", False),
             "dual_auth_present": metadata.get("dual_auth_present", False),
             "is_repeat_offender": metadata.get("is_repeat_offender", False),
@@ -105,8 +108,15 @@ class ClassificationBridge:
             ),
             "contains_system_commands": metadata.get("contains_system_commands", False),
             "contains_exfiltration": metadata.get("contains_exfiltration", False),
+            "contains_harmful_content": metadata.get("contains_harmful_content", False),
+            "contains_privacy_violation": metadata.get("contains_privacy_violation", False),
             "is_business_hours": metadata.get("is_business_hours", True),
             "source_ip_reputation": metadata.get("source_ip_reputation", "unknown"),
+            "organization_id": metadata.get("organization_id", "default"),
+            "department": metadata.get("department", "default"),
+            "data_classification": metadata.get("data_classification", "internal"),
+            "network_zone": metadata.get("network_zone", "internal"),
+            "compliance_frameworks": metadata.get("compliance_frameworks", []),
         }
 
         return ClassifiedIncident(

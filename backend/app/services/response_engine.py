@@ -214,6 +214,7 @@ class ResponseEngine:
         self,
         db: AsyncSession,
         incident_id: str,
+        playbook_id: Optional[str] = None,
     ) -> PlaybookExecutionResult:
         """Execute the playbook for an incident.
 
@@ -242,8 +243,18 @@ class ResponseEngine:
                 error_log=f"Incident {incident_id} not found",
             )
 
-        # Resolve playbook
-        playbook = await self.resolve_playbook(db, incident.incident_type)
+        # Resolve playbook: use explicit playbook_id if provided, else lookup by incident_type
+        if playbook_id:
+            pb_result = await db.execute(
+                select(Playbook).where(
+                    Playbook.playbook_id == playbook_id,
+                    Playbook.is_active == True,
+                )
+            )
+            playbook = pb_result.scalar_one_or_none()
+        else:
+            playbook = await self.resolve_playbook(db, incident.incident_type)
+
         if playbook is None:
             return PlaybookExecutionResult(
                 response_id=response_id,

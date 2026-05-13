@@ -1,5 +1,6 @@
 """Judge Layer API router."""
 
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -71,10 +72,43 @@ async def evaluate_action(
     await renderer.render(db, incident_id, judge_result, agent_id=request.agent_id)
     await db.commit()
 
-    # Step 5: Record bypass attempts if any detected
+    # Step 5: Auto-create bypass incident and record attempts
     if bypass_result.patterns_detected:
+        from app.services.detect.incident_factory import IncidentFactory
+        from app.services.detect.normalizer import PB_CES_Event
+
+        # Create AGT-BYP-014 incident for the bypass attempt
+        bypass_event = PB_CES_Event(
+            event_id=f"bypass-{request.agent_id}-{int(time.time())}",
+            source="judge_layer",
+            event_type="bypass_detected",
+            tool_call=request.action,
+            agent_id=request.agent_id,
+            session_id=request.session_id,
+        )
+        from app.services.detect.engine import DetectionResult
+        bypass_detection = DetectionResult(
+            incident_type="AGT-BYP-014",
+            incident_type_name="Guardrail Bypass",
+            severity="critical",
+            confidence=bypass_result.confidence,
+            anomaly_score=bypass_result.confidence * 100,
+            matched_rules=[f"bypass:{p}" for p in bypass_result.patterns_detected],
+            matched_patterns=bypass_result.patterns_detected,
+            deterministic=True,
+            category="bypass",
+        )
+        bypass_incident = await IncidentFactory.create_incident(
+            db, bypass_event, bypass_detection
+        )
+        await db.flush()
+
+        # Update the original incident if there is one
+        if incident_id:
+            bypass_incident.event_id = incident_id
+
+        # Record bypass attempts
         for pattern_name in bypass_result.patterns_detected:
-            # Find pattern ID
             pattern_result = await db.execute(
                 select(BypassPattern).where(BypassPattern.pattern_name == pattern_name)
             )
@@ -82,7 +116,7 @@ async def evaluate_action(
             pattern_id = pattern.id if pattern else ""
 
             attempt = BypassAttempt(
-                incident_id=incident_id or "pre-screen",
+                incident_id=bypass_incident.id,
                 pattern_id=pattern_id,
                 detection_confidence=bypass_result.confidence,
                 payload_sample=request.action[:500],

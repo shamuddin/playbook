@@ -28,8 +28,8 @@ class TestDeterminism:
         # First evaluation as baseline
         baseline = await engine.evaluate(seeded_db, inp)
 
-        # Run 99 more times (100 total)
-        for _ in range(99):
+        # Run 999 more times (1000 total)
+        for _ in range(999):
             result = await engine.evaluate(seeded_db, inp)
             assert result.verdict == baseline.verdict
             assert result.severity_score == baseline.severity_score
@@ -44,7 +44,7 @@ class TestDeterminism:
 
         baseline = detector.evaluate(text=text)
 
-        for _ in range(100):
+        for _ in range(1000):
             result = detector.evaluate(text=text)
             assert result.patterns_detected == baseline.patterns_detected
             assert result.confidence == baseline.confidence

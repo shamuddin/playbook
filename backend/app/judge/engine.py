@@ -229,7 +229,31 @@ class JudgeEngine:
 
         Returns:
             JudgeResult with verdict, severity score, rationale, etc.
+
+        Fail-closed: any exception returns ESCALATE.
         """
+        start = time.perf_counter()
+        try:
+            return await self._evaluate_inner(db, input_data, bypass_patterns)
+        except Exception as exc:
+            latency_ms = (time.perf_counter() - start) * 1000
+            return JudgeResult(
+                verdict=JudgeVerdict.ESCALATE,
+                severity_score=10,
+                confidence=1.0,
+                matched_rules=["fail_closed"],
+                bypass_patterns_detected=bypass_patterns or [],
+                rationale=f"Exception during judge evaluation: {exc}",
+                latency_ms=round(latency_ms, 3),
+            )
+
+    async def _evaluate_inner(
+        self,
+        db: AsyncSession,
+        input_data: JudgeInput,
+        bypass_patterns: Optional[List[str]] = None,
+    ) -> JudgeResult:
+        """Core evaluation logic (wrapped by evaluate for fail-closed)."""
         start = time.perf_counter()
         matched_rules = []
         rationale_parts = []
