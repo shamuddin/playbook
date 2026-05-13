@@ -8,8 +8,9 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import BypassPattern, DetectionRule, NistBaseline, Playbook, PlaybookAction
+from app.models import BypassPattern, ComplianceMapping, DetectionRule, NistBaseline, Playbook, PlaybookAction
 from app.seed.bypass_patterns import BYPASS_PATTERNS_SEED
+from app.seed.compliance_mappings import COMPLIANCE_MAPPINGS_SEED
 from app.seed.detection_rules import DETECTION_RULES_SEED
 from app.seed.nist_baselines import NIST_BASELINES_SEED
 from app.seed.playbooks import PLAYBOOKS_SEED
@@ -141,6 +142,31 @@ async def _seed_nist_baselines(db: AsyncSession) -> int:
     return count
 
 
+async def _seed_compliance_mappings(db: AsyncSession) -> int:
+    """Seed compliance mappings if none exist."""
+    result = await db.execute(select(ComplianceMapping).limit(1))
+    if result.scalar_one_or_none() is not None:
+        logger.info("ComplianceMapping records already exist, skipping seed")
+        return 0
+
+    count = 0
+    for map_data in COMPLIANCE_MAPPINGS_SEED:
+        mapping = ComplianceMapping(
+            incident_type=map_data["incident_type"],
+            framework=map_data["framework"],
+            control_id=map_data["control_id"],
+            control_name=map_data["control_name"],
+            risk_level=map_data["risk_level"],
+            confidence=map_data["confidence"],
+        )
+        db.add(mapping)
+        count += 1
+
+    await db.flush()
+    logger.info(f"Seeded {count} compliance mappings")
+    return count
+
+
 async def seed_all(db: AsyncSession) -> dict[str, int]:
     """Idempotently seed all reference data.
 
@@ -151,6 +177,7 @@ async def seed_all(db: AsyncSession) -> dict[str, int]:
         "detection_rules": await _seed_detection_rules(db),
         "playbooks": await _seed_playbooks(db),
         "nist_baselines": await _seed_nist_baselines(db),
+        "compliance_mappings": await _seed_compliance_mappings(db),
     }
     await db.commit()
     return results

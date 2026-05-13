@@ -358,6 +358,42 @@ class ResponseEngine:
             },
         )
         db.add(timeline_complete)
+        await db.flush()
+
+        # Trigger forensics evidence package generation
+        try:
+            from app.services.forensics import ForensicsService
+            forensics_service = ForensicsService()
+            evidence = await forensics_service.build_package(db, incident_id)
+            await db.flush()
+
+            # Add forensics timeline event
+            forensics_timeline = TimelineEvent(
+                incident_id=incident.id,
+                stage="forensics",
+                event_type="evidence_package_created",
+                event_description=f"Evidence package {evidence.package_id} generated",
+                source_component="response_engine",
+                details_json={
+                    "package_id": evidence.package_id,
+                    "integrity_hash": evidence.integrity_hash,
+                },
+            )
+            db.add(forensics_timeline)
+            incident.forensics_status = "completed"
+        except Exception as exc:
+            # Fail-open: log but don't block response completion
+            incident.forensics_status = "failed"
+            forensics_error = TimelineEvent(
+                incident_id=incident.id,
+                stage="forensics",
+                event_type="evidence_package_failed",
+                event_description="Evidence package generation failed",
+                source_component="response_engine",
+                details_json={"error": str(exc)},
+            )
+            db.add(forensics_error)
+
         await db.commit()
 
         return PlaybookExecutionResult(

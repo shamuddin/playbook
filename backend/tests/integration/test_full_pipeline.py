@@ -15,6 +15,7 @@ from app.services.detect.engine import DetectionEngine
 from app.services.detect.incident_factory import IncidentFactory
 from app.services.detect.normalizer import PB_CES_Event
 from app.judge import BypassDetector, JudgeEngine, DecisionRenderer
+from app.services.forensics import ForensicsService
 from app.services.response_engine import ResponseEngine
 
 
@@ -203,3 +204,77 @@ class TestFullPipeline:
         judge_result = await judge_engine.evaluate(seeded_db, judge_input)
         assert judge_result.verdict == "ALLOW"
         assert judge_result.severity_score <= 3
+
+    @pytest.mark.asyncio
+    async def test_pipeline_forensics_package(self, seeded_db):
+        """Full pipeline through forensics: build evidence package and verify."""
+        from app.models import EvidencePackage
+
+        # Create incident with detection + response
+        event = PB_CES_Event(
+            event_id="pipeline-forensics-001",
+            source="test",
+            event_type="tool_call",
+            tool_call="DELETE FROM orders WHERE 1=1",
+            agent_id="agent-forensics",
+        )
+
+        detect_engine = DetectionEngine()
+        detection = detect_engine.evaluate(event)
+        incident = await IncidentFactory.create_incident(seeded_db, event, detection)
+        await seeded_db.commit()
+
+        # Judge + render
+        from app.judge.engine import JudgeInput
+
+        judge_input = JudgeInput(
+            action=event.tool_call,
+            agent_id=event.agent_id,
+            incident_type=detection.incident_type or "AGT-DEL-001",
+            severity=detection.severity,
+            auth_present=False,
+        )
+        judge_engine = JudgeEngine()
+        judge_result = await judge_engine.evaluate(seeded_db, judge_input)
+        renderer = DecisionRenderer()
+        await renderer.render(seeded_db, incident.id, judge_result, agent_id=event.agent_id)
+        await seeded_db.commit()
+
+        # Respond
+        response_engine = ResponseEngine()
+        await response_engine.execute_playbook(seeded_db, incident.incident_id)
+        await seeded_db.commit()
+
+        # Forensics
+        forensics = ForensicsService()
+        package = await forensics.build_package(seeded_db, incident.incident_id)
+        await seeded_db.commit()
+
+        assert package is not None
+        assert package.package_id.startswith("EVIDENCE-")
+        assert package.incident_id == incident.id
+        assert package.integrity_hash is not None
+        assert len(package.integrity_hash) == 64  # SHA-256 hex
+        assert package.is_verified is True
+        assert package.package_data is not None
+        assert "manifest" in package.package_data
+        assert "signature" in package.package_data
+        assert "artifacts" in package.package_data
+
+        # Verify ZIP export
+        zip_bytes = forensics.export_zip(package)
+        assert len(zip_bytes) > 0
+        import zipfile, io
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        names = zf.namelist()
+        assert "manifest.json" in names
+        assert "signature.json" in names
+        assert any("artifacts/" in n for n in names)
+
+        # Verify package stored in DB
+        db_result = await seeded_db.execute(
+            select(EvidencePackage).where(EvidencePackage.package_id == package.package_id)
+        )
+        db_package = db_result.scalar_one_or_none()
+        assert db_package is not None
+        assert db_package.integrity_hash == package.integrity_hash

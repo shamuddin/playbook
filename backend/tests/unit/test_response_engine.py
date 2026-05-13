@@ -143,3 +143,48 @@ class TestResponseEngine:
         elapsed = (time.perf_counter() - start) * 1000
         assert elapsed < 50
         assert playbook is not None
+
+
+class TestForensicsCrypto:
+    """Unit tests for forensics cryptographic helpers."""
+
+    def test_sha256_dict_determinism(self):
+        """Same input must produce same hash."""
+        from app.services.forensics import _sha256_dict
+        data = {"a": 1, "b": "test", "c": [1, 2, 3]}
+        h1 = _sha256_dict(data)
+        h2 = _sha256_dict(data)
+        assert h1 == h2
+        assert len(h1) == 64
+
+    def test_sha256_dict_order_independence(self):
+        """Dict key order should not affect hash."""
+        from app.services.forensics import _sha256_dict
+        d1 = {"x": 1, "y": 2}
+        d2 = {"y": 2, "x": 1}
+        assert _sha256_dict(d1) == _sha256_dict(d2)
+
+    def test_sign_manifest_verifiable(self):
+        """HMAC signature should be verifiable."""
+        import hmac, hashlib, json
+        from app.services.forensics import _sign_manifest
+        manifest = {"package_id": "PKG-001", "files": {"a.json": "abc123"}}
+        secret = "test-secret-key"
+        sig = _sign_manifest(manifest, secret)
+        # Verify by recomputing
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str)
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        assert sig == expected
+        assert len(sig) == 64
+
+    def test_sign_manifest_different_secrets(self):
+        """Different secrets must produce different signatures."""
+        from app.services.forensics import _sign_manifest
+        manifest = {"package_id": "PKG-001", "files": {"a.json": "abc123"}}
+        sig1 = _sign_manifest(manifest, "secret-a")
+        sig2 = _sign_manifest(manifest, "secret-b")
+        assert sig1 != sig2
