@@ -56,6 +56,25 @@ async def test_app(db_session) -> FastAPI:
 
 
 @pytest_asyncio.fixture
+async def seeded_test_app(db_session) -> FastAPI:
+    """App fixture with seeded reference data."""
+    from app.seed import seed_all
+    await seed_all(db_session)
+
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    return app
+
+
+@pytest_asyncio.fixture
+async def seeded_async_client(seeded_test_app) -> AsyncGenerator[AsyncClient, None]:
+    async with AsyncClient(app=seeded_test_app, base_url="http://test") as client:
+        yield client
+
+
+@pytest_asyncio.fixture
 async def async_client(test_app) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(app=test_app, base_url="http://test") as client:
         yield client

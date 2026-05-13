@@ -8,7 +8,9 @@ from app.core.logging import setup_logging
 from app.database import AsyncSessionLocal, engine
 from app.models import Base
 from app.routers import (
+    agents,
     compliance,
+    dashboard,
     demo,
     forensics,
     health,
@@ -113,6 +115,8 @@ app.include_router(playbooks.router, prefix=settings.api_prefix)
 app.include_router(policy_builder.router, prefix=settings.api_prefix)
 app.include_router(forensics.router, prefix=settings.api_prefix)
 app.include_router(compliance.router, prefix=settings.api_prefix)
+app.include_router(agents.router, prefix=settings.api_prefix)
+app.include_router(dashboard.router, prefix=settings.api_prefix)
 app.include_router(demo.router, prefix=settings.api_prefix)
 app.include_router(websocket.router, prefix=settings.api_prefix)
 

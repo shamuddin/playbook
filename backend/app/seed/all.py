@@ -8,10 +8,19 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import BypassPattern, ComplianceMapping, DetectionRule, NistBaseline, Playbook, PlaybookAction
+from app.models import (
+    BypassPattern,
+    ComplianceMapping,
+    DetectionRule,
+    IndustryTemplate,
+    NistBaseline,
+    Playbook,
+    PlaybookAction,
+)
 from app.seed.bypass_patterns import BYPASS_PATTERNS_SEED
 from app.seed.compliance_mappings import COMPLIANCE_MAPPINGS_SEED
 from app.seed.detection_rules import DETECTION_RULES_SEED
+from app.seed.industry_templates import INDUSTRY_TEMPLATES_SEED
 from app.seed.nist_baselines import NIST_BASELINES_SEED
 from app.seed.playbooks import PLAYBOOKS_SEED
 
@@ -167,6 +176,30 @@ async def _seed_compliance_mappings(db: AsyncSession) -> int:
     return count
 
 
+async def _seed_industry_templates(db: AsyncSession) -> int:
+    """Seed industry templates if none exist."""
+    result = await db.execute(select(IndustryTemplate).limit(1))
+    if result.scalar_one_or_none() is not None:
+        logger.info("IndustryTemplate records already exist, skipping seed")
+        return 0
+
+    count = 0
+    for tpl_data in INDUSTRY_TEMPLATES_SEED:
+        template = IndustryTemplate(
+            template_id=tpl_data["template_id"],
+            name=tpl_data["name"],
+            description=tpl_data["description"],
+            odp_set=tpl_data["odp_set"],
+            is_active=True,
+        )
+        db.add(template)
+        count += 1
+
+    await db.flush()
+    logger.info(f"Seeded {count} industry templates")
+    return count
+
+
 async def seed_all(db: AsyncSession) -> dict[str, int]:
     """Idempotently seed all reference data.
 
@@ -178,6 +211,7 @@ async def seed_all(db: AsyncSession) -> dict[str, int]:
         "playbooks": await _seed_playbooks(db),
         "nist_baselines": await _seed_nist_baselines(db),
         "compliance_mappings": await _seed_compliance_mappings(db),
+        "industry_templates": await _seed_industry_templates(db),
     }
     await db.commit()
     return results

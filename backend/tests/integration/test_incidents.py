@@ -201,7 +201,8 @@ class TestIncidentEndpoints:
         assert response.status_code == 422
         assert "metadata" in response.json()["detail"].lower()
 
-    async def test_get_incident_forensics(self, async_client: AsyncClient):
+    async def test_get_incident_forensics(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
         """Test the canonical /incidents/{id}/forensics endpoint."""
         # Create incident
         create_resp = await async_client.post("/api/v1/incidents", json={
@@ -222,7 +223,8 @@ class TestIncidentEndpoints:
         assert "manifest" in data
         assert "signature" in data
 
-    async def test_get_incident_forensics_stix(self, async_client: AsyncClient):
+    async def test_get_incident_forensics_stix(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
         """Test STIX 2.1 export via incidents endpoint."""
         create_resp = await async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-EXT-005",
@@ -242,7 +244,8 @@ class TestIncidentEndpoints:
         assert data["spec_version"] == "2.1"
         assert len(data["objects"]) > 0
 
-    async def test_compliance_gap_analysis(self, async_client: AsyncClient):
+    async def test_compliance_gap_analysis(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
         """Test compliance gap analysis endpoint."""
         response = await async_client.get("/api/v1/compliance/gap-analysis?framework=eu_ai_act")
         assert response.status_code == 200
@@ -252,3 +255,60 @@ class TestIncidentEndpoints:
         assert "coverage_percentage" in data
         assert "uncovered" in data
         assert "critical_gaps" in data
+
+    async def test_dashboard_stats(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test dashboard aggregate statistics endpoint."""
+        response = await async_client.get("/api/v1/dashboard")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "overview" in data
+        assert "incidents" in data
+        assert "agents" in data
+        assert "judge_layer" in data
+        assert data["period"] == "24h"
+
+    async def test_dashboard_alerts(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test dashboard active alerts endpoint."""
+        response = await async_client.get("/api/v1/dashboard/alerts")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "alerts" in data
+
+    async def test_list_agents(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test agent listing endpoint."""
+        response = await async_client.get("/api/v1/agents")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "items" in data
+        assert "total" in data
+
+    async def test_policy_builder_baselines(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test policy builder NIST baselines endpoint."""
+        response = await async_client.get("/api/v1/policy-builder/nist-baseline")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+    async def test_policy_builder_templates(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test policy builder industry templates endpoint."""
+        response = await async_client.get("/api/v1/policy-builder/templates")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+    async def test_policy_builder_resolve(self, seeded_async_client: AsyncClient):
+        async_client = seeded_async_client
+        """Test policy builder resolved policy endpoint."""
+        response = await async_client.get("/api/v1/policy-builder/resolve/AGT-DEL-001")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["incident_type"] == "AGT-DEL-001"
+        assert "baseline" in data
+        assert "effective_policy" in data
