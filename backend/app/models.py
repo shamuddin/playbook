@@ -542,6 +542,61 @@ class HumanReviewTask(Base):
 
 
 # ============================================================================
+# RESOLVED POLICIES VIEW
+# ============================================================================
+
+from sqlalchemy import select, text
+
+# This VIEW computes the effective policy per incident type by merging
+# NIST baselines with organizational ODPs.
+# It is created via raw SQL in the Alembic migration.
+ResolvedPolicyView = select(
+    NistBaseline.id.label("baseline_id"),
+    NistBaseline.incident_type,
+    NistBaseline.severity.label("baseline_severity"),
+    NistBaseline.auto_contain_enabled.label("baseline_auto_contain"),
+    NistBaseline.escalation_contacts.label("baseline_escalation_contacts"),
+    NistBaseline.response_time_sla_seconds.label("baseline_sla"),
+    NistBaseline.forensic_level.label("baseline_forensic_level"),
+    NistBaseline.notify_targets.label("baseline_notify_targets"),
+    NistBaseline.compliance_report.label("baseline_compliance_report"),
+    NistBaseline.record_threshold.label("baseline_record_threshold"),
+    OrganizationODP.odp_key,
+    OrganizationODP.odp_value,
+    OrganizationODP.value_type,
+).select_from(
+    NistBaseline
+).where(
+    NistBaseline.is_active == True
+).outerjoin(
+    OrganizationODP,
+    (NistBaseline.id == OrganizationODP.baseline_id) & (OrganizationODP.is_active == True)
+)
+
+
+# Raw SQL for creating the view in migrations
+RESOLVED_POLICIES_VIEW_SQL = """
+CREATE VIEW IF NOT EXISTS resolved_policies AS
+SELECT
+    nb.id AS baseline_id,
+    nb.incident_type,
+    nb.severity AS baseline_severity,
+    nb.auto_contain_enabled AS baseline_auto_contain,
+    nb.escalation_contacts AS baseline_escalation_contacts,
+    nb.response_time_sla_seconds AS baseline_sla,
+    nb.forensic_level AS baseline_forensic_level,
+    nb.notify_targets AS baseline_notify_targets,
+    nb.compliance_report AS baseline_compliance_report,
+    nb.record_threshold AS baseline_record_threshold,
+    ood.odp_key,
+    ood.odp_value,
+    ood.value_type
+FROM nist_baselines nb
+LEFT JOIN organization_odps ood ON nb.id = ood.baseline_id AND ood.is_active = 1
+WHERE nb.is_active = 1;
+"""
+
+# ============================================================================
 # AUDIT TRIGGERS (via SQLAlchemy events)
 # ============================================================================
 
