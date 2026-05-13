@@ -16,7 +16,7 @@ Environment:
     GEMINI_MODEL_FLASH -- fast model (default: gemini-3.1-flash-lite)
     GEMINI_MODEL_PRO   -- high-quality model (default: gemini-3.1-pro-preview)
     GCP_PROJECT_ID     -- Google Cloud project ID
-    GCP_LOCATION       -- Vertex AI region (default: us-central1)
+    GCP_LOCATION       -- Vertex AI region (default: global)
 """
 
 import asyncio
@@ -26,14 +26,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.core.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models import GeminiCache
 from app.services.gemini_cache import GeminiCacheService
 
+settings = get_settings()
 MODEL_FLASH = os.getenv("GEMINI_MODEL_FLASH", "gemini-3.1-flash-lite")
 MODEL_PRO = os.getenv("GEMINI_MODEL_PRO", "gemini-3.1-pro-preview")
-PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-LOCATION = os.getenv("GCP_LOCATION", "us-central1")
+PROJECT_ID = os.getenv("GCP_PROJECT_ID") or settings.gcp_project_id
+LOCATION = os.getenv("GCP_LOCATION") or settings.gcp_location
+DEMO_MODE = settings.is_demo_mode
 
 # Pre-written static enrichment narratives (fallback when Gemini unavailable)
 STATIC_NARRATIVES = {
@@ -106,21 +109,34 @@ async def populate_cache(db):
     use_live = client is not None
 
     if not use_live:
-        print("[populate] Gemini unavailable — using static enrichment narratives")
+        if DEMO_MODE:
+            print("[populate] Gemini unavailable — using static enrichment narratives (DEMO_MODE)")
+        else:
+            print("[populate] ERROR: Gemini unavailable in LIVE mode.")
+            print("[populate] Enable Vertex AI API: https://console.cloud.google.com/vertex-ai")
+            raise RuntimeError("Vertex AI API not enabled — cannot populate cache in live mode")
     else:
         # Quick health check with a simple prompt
         try:
             test_resp = await client.aio.models.generate_content(
                 model=MODEL_FLASH,
                 contents="Say OK",
-                config=config_cls(max_output_tokens=5),
+                config=config_cls(max_output_tokens=20),
             )
-            if not (test_resp and test_resp.text):
+            # Check for valid response (candidates present, not just text)
+            if not (test_resp and test_resp.candidates):
                 use_live = False
-                print("[populate] Gemini health check failed — using static narratives")
+                if DEMO_MODE:
+                    print("[populate] Gemini health check failed — using static narratives (DEMO_MODE)")
+                else:
+                    raise RuntimeError("Gemini health check failed in live mode")
+            print(f"[populate] Gemini health check OK ({test_resp.model_version})")
         except Exception:
-            use_live = False
-            print("[populate] Gemini health check failed — using static narratives")
+            if DEMO_MODE:
+                use_live = False
+                print("[populate] Gemini health check failed — using static narratives (DEMO_MODE)")
+            else:
+                raise
 
     cache_service = GeminiCacheService()
 
@@ -144,8 +160,11 @@ async def populate_cache(db):
             prompt = f"Explain in 2-3 sentences why incident type {incident_type} is a critical security concern for AI agents."
             narrative = await _generate_live(client, config_cls, incident_type, prompt)
             if not narrative:
-                narrative = static_narrative
-                print(f"[populate] {incident_type} -> fell back to static narrative")
+                if DEMO_MODE:
+                    narrative = static_narrative
+                    print(f"[populate] {incident_type} -> fell back to static narrative")
+                else:
+                    raise RuntimeError(f"Gemini failed for {incident_type} in live mode")
         else:
             narrative = static_narrative
             print(f"[populate] {incident_type} -> static narrative ({len(narrative)} chars)")

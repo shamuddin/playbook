@@ -2,7 +2,7 @@ from typing import AsyncGenerator
 
 import pytest_asyncio
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -70,11 +70,11 @@ async def seeded_test_app(db_session) -> FastAPI:
 
 @pytest_asyncio.fixture
 async def seeded_async_client(seeded_test_app) -> AsyncGenerator[AsyncClient, None]:
-    async with AsyncClient(app=seeded_test_app, base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=seeded_test_app), base_url="http://test") as client:
         yield client
 
 
 @pytest_asyncio.fixture
 async def async_client(test_app) -> AsyncGenerator[AsyncClient, None]:
-    async with AsyncClient(app=test_app, base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as client:
         yield client

@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     algorithm: str = "HS256"
 
-    # Gemini
+    # Gemini / Vertex AI
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-pro"
     gemini_max_tokens: int = 2048
@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: int = 30
     gemini_cache_enabled: bool = True
     gemini_cache_path: str = "./data/gemini_cache.json"
+    gcp_project_id: Optional[str] = None
+    gcp_location: str = "global"
 
     # Lobster Trap
     lobstertrap_binary_path: str = "./bin/lobstertrap"
