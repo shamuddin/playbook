@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.database import engine
+from app.database import AsyncSessionLocal, engine
 from app.models import Base
 from app.routers import (
     compliance,
@@ -18,6 +18,7 @@ from app.routers import (
     policy_builder,
     websocket,
 )
+from app.seed import seed_all
 
 settings = get_settings()
 
@@ -29,6 +30,18 @@ async def lifespan(app: FastAPI):
     setup_logging()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Seed reference data if configured
+    if settings.is_demo_mode or settings.seed_on_startup:
+        async with AsyncSessionLocal() as session:
+            try:
+                seeded = await seed_all(session)
+                for table, count in seeded.items():
+                    if count:
+                        print(f"[seed] {table}: +{count} records")
+            except Exception as exc:
+                print(f"[seed] Warning: seeding failed: {exc}")
+
     yield
     # Shutdown
     await engine.dispose()

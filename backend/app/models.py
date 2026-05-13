@@ -43,6 +43,7 @@ class Incident(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     category: Mapped[str] = mapped_column(String(20), nullable=False)
+    incident_type: Mapped[str] = mapped_column(String(20), nullable=False, default="AGT-GAP-012")
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     local_rule_id: Mapped[str] = mapped_column(String(50), nullable=True)
@@ -75,7 +76,7 @@ class Incident(Base):
     response_record: Mapped["ResponseRecord"] = relationship(
         back_populates="incident", uselist=False
     )
-    forensics_package: Mapped["ForensicsPackage"] = relationship(
+    forensics_package: Mapped["EvidencePackage"] = relationship(
         back_populates="incident", uselist=False
     )
     human_reviews: Mapped[list["HumanReviewTask"]] = relationship(

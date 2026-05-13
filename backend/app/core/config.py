@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     nist_baseline_path: str = "./data/nist_baselines.json"
     odp_defaults_path: str = "./data/odp_defaults.json"
 
+    # Seeding
+    seed_on_startup: bool = False
+
     @property
     def is_development(self) -> bool:
         return self.environment == "development"

@@ -1,10 +1,19 @@
+"""Incident API router.
+
+Endpoints for incident CRUD, classification, response triggering, and timeline.
+"""
+
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.database import get_db
+from app.models import Incident, IncidentMetadata, TimelineEvent
 from app.schemas import (
+    EventIngestRequest,
     IncidentCreate,
     IncidentFilter,
     IncidentListResponse,
@@ -12,8 +21,146 @@ from app.schemas import (
     StandardResponse,
     TimelineEventResponse,
 )
+from app.services.detect import DetectionEngine, IncidentFactory, normalize_event
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _get_incident_or_404(
+    db: AsyncSession, incident_id: str
+) -> Incident:
+    """Fetch an incident by its public incident_id, raising 404 if not found."""
+    result = await db.execute(
+        select(Incident).where(Incident.incident_id == incident_id)
+    )
+    incident = result.scalar_one_or_none()
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident {incident_id} not found",
+        )
+    return incident
+
+
+def _incident_to_response(incident: Incident) -> IncidentResponse:
+    """Convert an Incident model to an IncidentResponse schema."""
+    return IncidentResponse(
+        id=incident.id,
+        incident_id=incident.incident_id,
+        event_id=incident.event_id,
+        status=incident.status,
+        severity=incident.severity,
+        category=incident.category,
+        incident_type=incident.incident_type,
+        confidence=incident.confidence,
+        playbook_id=incident.playbook_id,
+        response_status=incident.response_status,
+        forensics_status=incident.forensics_status,
+        judge_verdict=None,
+        bypass_detected=incident.bypass_detected,
+        created_at=incident.created_at,
+        updated_at=incident.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "",
+    response_model=IncidentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_incident(
+    data: IncidentCreate,
+    db: AsyncSession = Depends(get_db),
+) -> IncidentResponse:
+    """Create a new incident manually (bypassing the detection engine).
+
+    Use /ingest to auto-detect from a raw event.
+    """
+    incident = Incident(
+        incident_id=IncidentFactory._generate_incident_id(),
+        event_id=data.event_id,
+        status="detected",
+        severity=data.severity,
+        category=data.category,
+        incident_type=data.incident_type,
+        confidence=data.confidence,
+        deterministic_classification=True,
+        response_status="pending",
+        forensics_status="pending",
+    )
+    db.add(incident)
+    await db.flush()
+
+    # Add metadata if provided
+    if data.metadata:
+        meta = IncidentMetadata(
+            incident_id=incident.id,
+            full_metadata_json=data.metadata,
+        )
+        db.add(meta)
+
+    # Add detection timeline event
+    timeline = TimelineEvent(
+        incident_id=incident.id,
+        stage="detect",
+        event_type="manual_creation",
+        event_description=f"Manually created incident with severity {data.severity}",
+        source_component="api",
+    )
+    db.add(timeline)
+    await db.commit()
+
+    return _incident_to_response(incident)
+
+
+@router.post(
+    "/ingest",
+    response_model=IncidentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_event(
+    request: EventIngestRequest,
+    db: AsyncSession = Depends(get_db),
+) -> IncidentResponse:
+    """Ingest a raw agent event, run detection, and create an incident.
+
+    This is the primary entry point for the DETECT pipeline.
+    """
+    # Normalize the event
+    try:
+        event = normalize_event(request.event_data, source_hint=request.source)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Event normalization failed: {exc}",
+        )
+
+    # Run detection engine
+    engine = DetectionEngine()
+    detection = engine.evaluate(event)
+
+    # If no match, still create a low-confidence incident (coverage gap)
+    if detection.incident_type is None:
+        detection.incident_type = "AGT-GAP-012"
+        detection.incident_type_name = "Coverage Gap"
+        detection.severity = "low"
+        detection.confidence = 0.1
+        detection.anomaly_score = 10.0
+        detection.category = "coverage"
+
+    # Create incident
+    incident = await IncidentFactory.create_incident(db, event, detection)
+    await db.commit()
+
+    return _incident_to_response(incident)
 
 
 @router.get("", response_model=IncidentListResponse)
@@ -26,8 +173,38 @@ async def list_incidents(
     db: AsyncSession = Depends(get_db),
 ) -> IncidentListResponse:
     """List incidents with filtering and pagination."""
-    # TODO(hackathon): Implement query
-    return IncidentListResponse(data=[], total=0, page=page, page_size=page_size)
+    query = select(Incident)
+
+    if status:
+        query = query.where(Incident.status == status)
+    if severity:
+        query = query.where(Incident.severity == severity)
+    if category:
+        query = query.where(Incident.category == category)
+
+    # Get total count
+    count_query = select(Incident.id).select_from(Incident)
+    if status:
+        count_query = count_query.where(Incident.status == status)
+    if severity:
+        count_query = count_query.where(Incident.severity == severity)
+    if category:
+        count_query = count_query.where(Incident.category == category)
+    count_result = await db.execute(count_query)
+    total = len(count_result.scalars().all())
+
+    # Get paginated results
+    query = query.order_by(Incident.created_at.desc())
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    incidents = result.scalars().all()
+
+    return IncidentListResponse(
+        data=[_incident_to_response(inc) for inc in incidents],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/{incident_id}", response_model=IncidentResponse)
@@ -35,19 +212,71 @@ async def get_incident(
     incident_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> IncidentResponse:
-    """Get a single incident by ID."""
-    # TODO(hackathon): Implement query
-    raise NotImplementedError()
+    """Get a single incident by its public incident_id."""
+    incident = await _get_incident_or_404(db, incident_id)
+    return _incident_to_response(incident)
 
 
-@router.post("/{incident_id}/classify", response_model=StandardResponse)
+@router.post("/{incident_id}/classify", response_model=IncidentResponse)
 async def classify_incident(
     incident_id: str,
     db: AsyncSession = Depends(get_db),
-) -> StandardResponse:
-    """Classify an incident."""
-    # TODO(hackathon): Implement classification
-    return StandardResponse(message="Classification queued")
+) -> IncidentResponse:
+    """Re-classify an incident by re-running the detection engine on its stored event data.
+
+    Updates severity, confidence, and category. Adds a timeline event.
+    """
+    incident = await _get_incident_or_404(db, incident_id)
+
+    # Retrieve stored metadata to reconstruct the event
+    meta_result = await db.execute(
+        select(IncidentMetadata).where(IncidentMetadata.incident_id == incident.id)
+    )
+    metadata = meta_result.scalar_one_or_none()
+
+    if metadata is None or not metadata.full_metadata_json:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Incident has no stored metadata for re-classification",
+        )
+
+    stored = metadata.full_metadata_json
+    event_data = stored.get("event_raw", {})
+    event_source = stored.get("event", {}).get("source", "generic")
+
+    # Re-normalize and detect
+    try:
+        event = normalize_event(event_data, source_hint=event_source)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Re-normalization failed: {exc}",
+        )
+
+    engine = DetectionEngine()
+    detection = engine.evaluate(event)
+
+    if detection.incident_type is None:
+        detection.incident_type = "AGT-GAP-012"
+        detection.severity = "low"
+        detection.confidence = 0.1
+        detection.category = "coverage"
+
+    # Update incident
+    incident.severity = detection.severity
+    incident.confidence = detection.confidence
+    incident.category = detection.category
+    incident.incident_type = detection.incident_type or "AGT-GAP-012"
+    incident.local_rule_id = detection.matched_rules[0] if detection.matched_rules else None
+    incident.status = "classified"
+
+    # Add classification timeline event
+    await IncidentFactory.add_classification_timeline_event(
+        db, incident, detection, classified_by="api"
+    )
+    await db.commit()
+
+    return _incident_to_response(incident)
 
 
 @router.post("/{incident_id}/respond", response_model=StandardResponse)
@@ -55,9 +284,37 @@ async def respond_to_incident(
     incident_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse:
-    """Trigger playbook response for an incident."""
-    # TODO(hackathon): Implement response
-    return StandardResponse(message="Response queued")
+    """Trigger playbook response for an incident.
+
+    In Phase 1 this sets the response_status to 'in_progress'.
+    Full playbook execution comes in Phase 2 (RESPOND).
+    """
+    incident = await _get_incident_or_404(db, incident_id)
+
+    if incident.response_status == "completed":
+        return StandardResponse(
+            message="Response already completed",
+            data={"incident_id": incident_id, "status": "completed"},
+        )
+
+    incident.response_status = "in_progress"
+    incident.status = "responding"
+
+    # Add timeline event
+    timeline = TimelineEvent(
+        incident_id=incident.id,
+        stage="respond",
+        event_type="response_triggered",
+        event_description="Playbook response triggered",
+        source_component="api",
+    )
+    db.add(timeline)
+    await db.commit()
+
+    return StandardResponse(
+        message="Response triggered",
+        data={"incident_id": incident_id, "status": "in_progress"},
+    )
 
 
 @router.get("/{incident_id}/timeline", response_model=list[TimelineEventResponse])
@@ -65,6 +322,25 @@ async def get_timeline(
     incident_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> list[TimelineEventResponse]:
-    """Get incident timeline."""
-    # TODO(hackathon): Implement query
-    return []
+    """Get the timeline of events for an incident."""
+    incident = await _get_incident_or_404(db, incident_id)
+
+    result = await db.execute(
+        select(TimelineEvent)
+        .where(TimelineEvent.incident_id == incident.id)
+        .order_by(TimelineEvent.timestamp.asc())
+    )
+    events = result.scalars().all()
+
+    return [
+        TimelineEventResponse(
+            id=evt.id,
+            timestamp=evt.timestamp,
+            stage=evt.stage,
+            event_type=evt.event_type,
+            event_description=evt.event_description,
+            source_component=evt.source_component,
+            details_json=evt.details_json,
+        )
+        for evt in events
+    ]

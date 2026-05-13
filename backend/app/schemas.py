@@ -47,6 +47,13 @@ class IncidentCreate(IncidentBase):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class EventIngestRequest(BaseModel):
+    """Request to ingest a raw agent event."""
+
+    source: str = "generic"  # lobstertrap, terrabric, suprawall, generic
+    event_data: Dict[str, Any] = Field(default_factory=dict)
+
+
 class IncidentResponse(IncidentBase):
     model_config = ConfigDict(from_attributes=True)
 
