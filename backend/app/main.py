@@ -17,6 +17,7 @@ from app.routers import (
     forensics,
     health,
     incidents,
+    integrations,
     judge,
     playbooks,
     policy_builder,
@@ -152,6 +153,7 @@ app.include_router(compliance.router, prefix=settings.api_prefix)
 app.include_router(agents.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
 app.include_router(demo.router, prefix=settings.api_prefix)
+app.include_router(integrations.router, prefix=settings.api_prefix)
 app.include_router(websocket.router, prefix=settings.api_prefix)
 
 
