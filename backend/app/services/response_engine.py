@@ -24,6 +24,7 @@ from app.models import (
     TimelineEvent,
     HumanReviewTask,
 )
+from app.services.websocket_manager import ws_manager
 
 
 @dataclass
@@ -147,6 +148,17 @@ class ResponseEngine:
                     status="pending",
                 )
                 db.add(review_task)
+                await db.flush()
+                # Broadcast human review required
+                await ws_manager.broadcast({
+                    "event_type": "HUMAN_REVIEW_REQUIRED",
+                    "task_id": review_task.task_id,
+                    "incident_id": incident.incident_id,
+                    "sla_deadline": (
+                        datetime.now(timezone.utc) + timedelta(minutes=30)
+                    ).isoformat(),
+                    "severity": incident.severity,
+                })
 
             elif action_type == PlaybookActionType.NOTIFY:
                 targets = action.parameters.get("targets", ["#security-alerts"])

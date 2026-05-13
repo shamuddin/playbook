@@ -9,6 +9,7 @@ import {
   Settings,
   ClipboardList,
   Sliders,
+  BarChart3,
 } from 'lucide-react'
 
 const navItems = [
@@ -17,6 +18,7 @@ const navItems = [
   { path: '/judge', label: 'Judge Layer', icon: Gavel },
   { path: '/agents', label: 'Agent Health', icon: Activity },
   { path: '/compliance', label: 'Compliance', icon: FileText },
+  { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/policy-builder', label: 'Policy Builder', icon: Sliders },
   { path: '/review', label: 'Review Queue', icon: ClipboardList },
   { path: '/settings', label: 'Settings', icon: Settings },

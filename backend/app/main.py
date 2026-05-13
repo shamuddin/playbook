@@ -1,4 +1,6 @@
+import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
 
     # Start log tailer in demo/development mode
     tailer = None
+    heartbeat_task = None
     if settings.is_demo_mode or settings.is_development:
         from app.services.detect import normalize_event
         from app.services.detect.engine import DetectionEngine
@@ -80,9 +83,40 @@ async def lifespan(app: FastAPI):
         await tailer.start()
         print(f"[tailer] Started monitoring: {tailer.log_dir}")
 
+        # Start WebSocket heartbeat
+        async def _heartbeat():
+            while True:
+                try:
+                    await asyncio.sleep(30)
+                    await ws_manager.broadcast({
+                        "event_type": "SYSTEM_STATUS",
+                        "status": "healthy",
+                        "components": {
+                            "api": "healthy",
+                            "database": "healthy",
+                            "websocket": "healthy",
+                        },
+                        "active_connections": ws_manager.active_connections,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    print(f"[heartbeat] Error: {exc}")
+
+        heartbeat_task = asyncio.create_task(_heartbeat())
+        print("[heartbeat] Started WebSocket status heartbeat (30s)")
+
     yield
 
     # Shutdown
+    if heartbeat_task is not None:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        print("[heartbeat] Stopped")
     if tailer is not None:
         await tailer.stop()
         print("[tailer] Stopped")

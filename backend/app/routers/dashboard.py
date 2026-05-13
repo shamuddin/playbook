@@ -350,3 +350,143 @@ async def get_system_metrics(
         },
         message="System metrics retrieved",
     )
+
+
+@router.get("/analytics/summary", response_model=StandardResponse)
+async def get_analytics_summary(
+    period: str = Query("7d", description="Time period: 1h, 6h, 24h, 7d, 30d"),
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """High-level analytics summary for the analytics dashboard."""
+    cutoff = _parse_period(period)
+
+    total_incidents = await db.scalar(select(func.count(Incident.id)))
+    period_incidents = await db.scalar(
+        select(func.count(Incident.id)).where(Incident.created_at >= cutoff)
+    )
+
+    # Category breakdown
+    cat_result = await db.execute(
+        select(Incident.category, func.count(Incident.id))
+        .where(Incident.created_at >= cutoff)
+        .group_by(Incident.category)
+    )
+    category_breakdown = {row[0] or "unknown": row[1] for row in cat_result.all()}
+
+    # Type breakdown
+    type_result = await db.execute(
+        select(Incident.incident_type, func.count(Incident.id))
+        .where(Incident.created_at >= cutoff)
+        .group_by(Incident.incident_type)
+        .order_by(func.count(Incident.id).desc())
+        .limit(10)
+    )
+    type_breakdown = {row[0]: row[1] for row in type_result.all()}
+
+    # Response time stats
+    avg_response = await db.scalar(
+        select(func.avg(
+            func.julianday(ResponseRecord.completed_at) - func.julianday(ResponseRecord.started_at)
+        ) * 24 * 60).where(
+            (ResponseRecord.completed_at != None) & (ResponseRecord.started_at >= cutoff)
+        )
+    )
+
+    # Judge decisions in period
+    decisions = await db.scalar(
+        select(func.count(JudgeDecision.id)).where(JudgeDecision.created_at >= cutoff)
+    )
+
+    # Agent health distribution
+    health_dist = {
+        "excellent": await db.scalar(select(func.count(Agent.id)).where(Agent.health_score >= 90)),
+        "good": await db.scalar(select(func.count(Agent.id)).where((Agent.health_score >= 70) & (Agent.health_score < 90))),
+        "fair": await db.scalar(select(func.count(Agent.id)).where((Agent.health_score >= 50) & (Agent.health_score < 70))),
+        "poor": await db.scalar(select(func.count(Agent.id)).where(Agent.health_score < 50)),
+    }
+
+    return StandardResponse(
+        data={
+            "period": period,
+            "total_incidents": total_incidents or 0,
+            "period_incidents": period_incidents or 0,
+            "category_breakdown": category_breakdown,
+            "type_breakdown": type_breakdown,
+            "avg_response_time_minutes": round(avg_response, 1) if avg_response else 0.0,
+            "judge_decisions_period": decisions or 0,
+            "agent_health_distribution": health_dist,
+        },
+        message="Analytics summary retrieved",
+    )
+
+
+@router.get("/analytics/trends", response_model=StandardResponse)
+async def get_analytics_trends(
+    period: str = Query("7d", description="Time period: 1h, 6h, 24h, 7d, 30d"),
+    granularity: str = Query("daily", description="Granularity: hourly, daily"),
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Incident and decision trend data for charts."""
+    cutoff = _parse_period(period)
+
+    # SQLite strftime for grouping
+    fmt = "%Y-%m-%d %H:00" if granularity == "hourly" else "%Y-%m-%d"
+
+    # Incident trends
+    inc_result = await db.execute(
+        select(
+            func.strftime(fmt, Incident.created_at),
+            func.count(Incident.id),
+        )
+        .where(Incident.created_at >= cutoff)
+        .group_by(func.strftime(fmt, Incident.created_at))
+        .order_by(func.strftime(fmt, Incident.created_at))
+    )
+    incident_trends = [
+        {"date": row[0], "count": row[1]} for row in inc_result.all()
+    ]
+
+    # Decision trends
+    dec_result = await db.execute(
+        select(
+            func.strftime(fmt, JudgeDecision.created_at),
+            func.count(JudgeDecision.id),
+        )
+        .where(JudgeDecision.created_at >= cutoff)
+        .group_by(func.strftime(fmt, JudgeDecision.created_at))
+        .order_by(func.strftime(fmt, JudgeDecision.created_at))
+    )
+    decision_trends = [
+        {"date": row[0], "count": row[1]} for row in dec_result.all()
+    ]
+
+    # Severity trends
+    sev_result = await db.execute(
+        select(
+            func.strftime(fmt, Incident.created_at),
+            Incident.severity,
+            func.count(Incident.id),
+        )
+        .where(Incident.created_at >= cutoff)
+        .group_by(func.strftime(fmt, Incident.created_at), Incident.severity)
+        .order_by(func.strftime(fmt, Incident.created_at))
+    )
+    severity_trends: dict = {}
+    for row in sev_result.all():
+        date, severity, count = row
+        if date not in severity_trends:
+            severity_trends[date] = {}
+        severity_trends[date][severity] = count
+
+    return StandardResponse(
+        data={
+            "period": period,
+            "granularity": granularity,
+            "incident_trends": incident_trends,
+            "decision_trends": decision_trends,
+            "severity_trends": [
+                {"date": d, **counts} for d, counts in severity_trends.items()
+            ],
+        },
+        message="Analytics trends retrieved",
+    )

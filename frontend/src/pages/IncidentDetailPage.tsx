@@ -142,6 +142,38 @@ export default function IncidentDetailPage() {
         </div>
       )}
 
+      {/* Quarantine Visualization */}
+      {(incident.judge_verdict === 'DENY' || incident.judge_verdict === 'QUARANTINE') && (
+        <div className="card p-5 border-2 border-orange-400 bg-orange-50">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+              <Ban className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-orange-800 uppercase tracking-wide">Lobster Trap Quarantine</h3>
+              <p className="text-xs text-orange-600">Deep Packet Inspection for AI — Agent output isolated</p>
+            </div>
+            <span className="ml-auto px-3 py-1 bg-orange-200 text-orange-800 text-xs font-bold rounded-full animate-pulse">
+              ACTIVE
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white p-3 rounded-lg border border-orange-200 text-center">
+              <p className="text-xs text-gray-500">Session</p>
+              <p className="text-sm font-mono font-medium text-gray-900 truncate">{incident.event_id || 'N/A'}</p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-orange-200 text-center">
+              <p className="text-xs text-gray-500">Status</p>
+              <p className="text-sm font-medium text-orange-700">ISOLATED</p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-orange-200 text-center">
+              <p className="text-xs text-gray-500">Action Blocked</p>
+              <p className="text-sm font-medium text-red-700">{incident.incident_type}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className={`card p-6 border-l-4 ${severityColor(incident.severity).split(' ').pop()}`}>
         <div className="flex items-start justify-between">

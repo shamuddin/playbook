@@ -12,6 +12,7 @@ import {
   Radio,
   Zap,
   Clock,
+  FileText,
 } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 
@@ -341,6 +342,12 @@ export default function DashboardPage() {
                   <Zap className="w-4 h-4 text-blue-500 shrink-0" />
                 ) : msg.event_type === 'incident_status_updated' ? (
                   <Activity className="w-4 h-4 text-purple-500 shrink-0" />
+                ) : msg.event_type === 'INCIDENT_CLASSIFIED' ? (
+                  <Shield className="w-4 h-4 text-indigo-500 shrink-0" />
+                ) : msg.event_type === 'INCIDENT_FORENSICS_COMPLETE' ? (
+                  <FileText className="w-4 h-4 text-green-500 shrink-0" />
+                ) : msg.event_type === 'HUMAN_REVIEW_REQUIRED' ? (
+                  <Gavel className="w-4 h-4 text-orange-500 shrink-0" />
                 ) : (
                   <Clock className="w-4 h-4 text-gray-400 shrink-0" />
                 )}

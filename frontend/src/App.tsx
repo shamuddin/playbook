@@ -10,6 +10,7 @@ import PolicyBuilderPage from './pages/PolicyBuilderPage'
 import ReviewQueuePage from './pages/ReviewQueuePage'
 import SettingsPage from './pages/SettingsPage'
 import ForensicsPage from './pages/ForensicsPage'
+import AnalyticsPage from './pages/AnalyticsPage'
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="review" element={<ReviewQueuePage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="forensics/:id" element={<ForensicsPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
