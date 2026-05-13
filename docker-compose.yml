@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: playbook-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./evidence:/app/evidence
+      - ./policies:/app/policies
+    environment:
+      - ENVIRONMENT=development
+      - DEMO_MODE=false
+      - DATABASE_URL=sqlite:///./data/playbooks.db
+      - SECRET_KEY=${SECRET_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LOBSTERTRAP_BINARY_PATH=/app/bin/lobstertrap
+      - PLAYBOOK_DIR=/app/policies
+      - EVIDENCE_STORE_PATH=/app/evidence
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: playbook-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  data:
+  logs:
+  evidence:
+  policies:
