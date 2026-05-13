@@ -200,3 +200,55 @@ class TestIncidentEndpoints:
         response = await async_client.post(f"/api/v1/incidents/{incident_id}/classify")
         assert response.status_code == 422
         assert "metadata" in response.json()["detail"].lower()
+
+    async def test_get_incident_forensics(self, async_client: AsyncClient):
+        """Test the canonical /incidents/{id}/forensics endpoint."""
+        # Create incident
+        create_resp = await async_client.post("/api/v1/incidents", json={
+            "incident_type": "AGT-DEL-001",
+            "severity": "critical",
+            "confidence": 0.95,
+            "category": "integrity",
+            "event_id": "evt-forensics-001",
+        })
+        incident_id = create_resp.json()["incident_id"]
+
+        # Get forensics (auto-generates on first request)
+        response = await async_client.get(f"/api/v1/incidents/{incident_id}/forensics")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["package_id"].startswith("EVIDENCE-")
+        assert data["integrity_hash"] is not None
+        assert "manifest" in data
+        assert "signature" in data
+
+    async def test_get_incident_forensics_stix(self, async_client: AsyncClient):
+        """Test STIX 2.1 export via incidents endpoint."""
+        create_resp = await async_client.post("/api/v1/incidents", json={
+            "incident_type": "AGT-EXT-005",
+            "severity": "high",
+            "confidence": 0.9,
+            "category": "confidentiality",
+            "event_id": "evt-forensics-002",
+        })
+        incident_id = create_resp.json()["incident_id"]
+
+        response = await async_client.get(
+            f"/api/v1/incidents/{incident_id}/forensics?format=stix"
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["type"] == "bundle"
+        assert data["spec_version"] == "2.1"
+        assert len(data["objects"]) > 0
+
+    async def test_compliance_gap_analysis(self, async_client: AsyncClient):
+        """Test compliance gap analysis endpoint."""
+        response = await async_client.get("/api/v1/compliance/gap-analysis?framework=eu_ai_act")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["framework"] == "eu_ai_act"
+        assert data["total_incident_types"] == 16
+        assert "coverage_percentage" in data
+        assert "uncovered" in data
+        assert "critical_gaps" in data

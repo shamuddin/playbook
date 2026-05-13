@@ -150,3 +150,70 @@ async def list_frameworks(
         },
         message=f"Found {len(frameworks)} compliance frameworks",
     )
+
+
+@router.get("/gap-analysis", response_model=StandardResponse)
+async def get_gap_analysis(
+    framework: str = Query(..., description="Framework to analyze gaps for"),
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Analyze compliance coverage gaps for a framework.
+
+    Returns which incident types lack coverage and recommends controls.
+    """
+    from app.core.constants import INCIDENT_TYPES
+
+    # Get all mappings for this framework
+    result = await db.execute(
+        select(ComplianceMapping).where(ComplianceMapping.framework == framework)
+    )
+    mappings = result.scalars().all()
+
+    covered_types = {m.incident_type for m in mappings}
+    all_types = set(INCIDENT_TYPES.keys())
+    uncovered_types = sorted(all_types - covered_types)
+
+    # Coverage stats by incident type
+    type_coverage = {}
+    for itype in all_types:
+        type_maps = [m for m in mappings if m.incident_type == itype]
+        type_coverage[itype] = {
+            "name": INCIDENT_TYPES[itype],
+            "mapped_controls": len(type_maps),
+            "risk_levels": [m.risk_level for m in type_maps],
+        }
+
+    # Overall metrics
+    total_controls = len(mappings)
+    coverage_pct = round(len(covered_types) / len(all_types) * 100, 1)
+
+    # Risk-weighted gap score
+    critical_gaps = sum(
+        1 for itype in uncovered_types
+        if itype in ("AGT-DEL-001", "AGT-EXT-005", "AGT-CRE-008", "AGT-BYP-014")
+    )
+
+    return StandardResponse(
+        data={
+            "framework": framework,
+            "total_incident_types": len(all_types),
+            "covered_types": len(covered_types),
+            "uncovered_types": len(uncovered_types),
+            "coverage_percentage": coverage_pct,
+            "critical_gaps": critical_gaps,
+            "uncovered": [
+                {"incident_type": t, "name": INCIDENT_TYPES[t]}
+                for t in uncovered_types
+            ],
+            "type_coverage": type_coverage,
+            "summary": {
+                "status": "complete" if coverage_pct == 100 else "gaps_detected",
+                "recommendation": (
+                    "All incident types are mapped."
+                    if coverage_pct == 100
+                    else f"Add controls for {len(uncovered_types)} uncovered incident types."
+                ),
+            },
+        },
+        message=f"Gap analysis for {framework}: {coverage_pct}% coverage",
+    )

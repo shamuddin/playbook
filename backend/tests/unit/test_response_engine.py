@@ -188,3 +188,103 @@ class TestForensicsCrypto:
         sig1 = _sign_manifest(manifest, "secret-a")
         sig2 = _sign_manifest(manifest, "secret-b")
         assert sig1 != sig2
+
+
+class TestForensicsService:
+    """Unit tests for ForensicsService methods."""
+
+    @pytest.fixture
+    def mock_evidence(self):
+        """Create a mock evidence package for testing."""
+        import hashlib, json
+        from unittest.mock import MagicMock
+        from datetime import datetime, timezone
+
+        evidence = MagicMock()
+        evidence.package_id = "EVIDENCE-TEST-001"
+        evidence.is_verified = True
+        evidence.created_at = datetime.now(timezone.utc)
+        evidence.retention_until = datetime.now(timezone.utc)
+
+        files = {"incident.json": "hash1", "timeline.json": "hash2"}
+        # Match _build_manifest canonicalization (no compact separators)
+        package_hash = hashlib.sha256(
+            json.dumps(files, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        evidence.integrity_hash = package_hash
+
+        evidence.package_data = {
+            "manifest": {
+                "package_hash": package_hash,
+                "files": files,
+            },
+            "signature": {
+                "algorithm": "HMAC-SHA256",
+                "signature": "",
+            },
+            "artifacts": {
+                "incident": {"incident_id": "INC-001", "severity": "critical"},
+                "timeline": [{"timestamp": "2024-01-01T00:00:00Z", "stage": "detect"}],
+                "judge": [{"verdict": "DENY", "severity_score": 9}],
+            },
+        }
+        return evidence
+
+    def test_verify_package_valid(self, mock_evidence):
+        """Verify package with correct signature returns overall=True."""
+        from app.core.config import get_settings
+        from app.services.forensics import ForensicsService, _sign_manifest
+
+        # Compute valid signature using actual secret key
+        manifest = mock_evidence.package_data["manifest"]
+        sig = _sign_manifest(manifest, get_settings().secret_key)
+        mock_evidence.package_data["signature"]["signature"] = sig
+
+        service = ForensicsService()
+        report = service.verify_package(mock_evidence)
+
+        assert report["overall"] is True
+        assert report["checks"]["manifest_hash_match"] is True
+        assert report["checks"]["manifest_recomputed"] is True
+        assert report["checks"]["signature_valid"] is True
+
+    def test_verify_package_tampered(self, mock_evidence):
+        """Verify package with wrong signature returns overall=False."""
+        from app.services.forensics import ForensicsService
+
+        mock_evidence.package_data["signature"]["signature"] = "invalid" * 8
+
+        service = ForensicsService()
+        report = service.verify_package(mock_evidence)
+
+        assert report["overall"] is False
+        assert report["checks"]["signature_valid"] is False
+
+    def test_export_stix_structure(self, mock_evidence):
+        """STIX export must produce valid STIX 2.1 bundle structure."""
+        from app.services.forensics import ForensicsService
+
+        service = ForensicsService()
+        bundle = service.export_stix(mock_evidence)
+
+        assert bundle["type"] == "bundle"
+        assert bundle["spec_version"] == "2.1"
+        assert "objects" in bundle
+        assert len(bundle["objects"]) > 0
+
+        types = {obj["type"] for obj in bundle["objects"]}
+        assert "incident" in types
+        assert "report" in types
+
+    def test_export_pdf_html_contains_key_data(self, mock_evidence):
+        """HTML export must contain incident key data."""
+        from app.services.forensics import ForensicsService
+
+        service = ForensicsService()
+        html = service.export_pdf_html(mock_evidence)
+
+        assert "EVIDENCE-TEST-001" in html
+        assert "INC-001" in html
+        assert "critical" in html
+        assert "detect" in html
+        assert "<!DOCTYPE html>" in html

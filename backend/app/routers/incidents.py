@@ -21,7 +21,9 @@ from app.schemas import (
     StandardResponse,
     TimelineEventResponse,
 )
+from app.models import EvidencePackage
 from app.services.detect import DetectionEngine, IncidentFactory, normalize_event
+from app.services.forensics import ForensicsService
 from app.services.response_engine import ResponseEngine
 from app.services.websocket_manager import ws_manager
 
@@ -365,3 +367,54 @@ async def get_timeline(
         )
         for evt in events
     ]
+
+
+@router.get("/{incident_id}/forensics", response_model=StandardResponse)
+async def get_incident_forensics(
+    incident_id: str,
+    format: str = Query("json", description="Output format: json, stix, verify"),
+    include_raw_logs: bool = Query(False, description="Include raw system log dumps"),
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Get forensic evidence package for an incident (API spec endpoint).
+
+    This is the canonical endpoint per API documentation.
+    """
+    incident = await _get_incident_or_404(db, incident_id)
+
+    ev_result = await db.execute(
+        select(EvidencePackage).where(EvidencePackage.incident_id == incident.id)
+    )
+    evidence = ev_result.scalar_one_or_none()
+
+    if evidence is None:
+        service = ForensicsService()
+        evidence = await service.build_package(db, incident_id)
+        await db.commit()
+
+    service = ForensicsService()
+
+    if format.lower() == "stix":
+        data = service.export_stix(evidence)
+        message = "Evidence package exported as STIX 2.1"
+    elif format.lower() == "verify":
+        data = service.verify_package(evidence)
+        message = "Evidence package integrity verification complete"
+    else:
+        data = {
+            "package_id": evidence.package_id,
+            "incident_id": incident_id,
+            "package_type": evidence.package_type,
+            "integrity_hash": evidence.integrity_hash,
+            "is_verified": evidence.is_verified,
+            "generated_at": evidence.created_at.isoformat() if evidence.created_at else None,
+            "retention_until": evidence.retention_until.isoformat() if evidence.retention_until else None,
+            "artifacts": list(evidence.package_data.get("artifacts", {}).keys()),
+            "manifest": evidence.package_data.get("manifest", {}),
+            "signature": evidence.package_data.get("signature", {}),
+        }
+        if include_raw_logs:
+            data["raw_logs"] = evidence.package_data.get("artifacts", {}).get("audit", [])
+        message = "Evidence package retrieved"
+
+    return StandardResponse(data=data, message=message)
