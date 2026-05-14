@@ -135,6 +135,7 @@ INCIDENT_TYPES = {
     "AGT-BYP-014": "Guardrail Bypass",
     "AGT-PRV-015": "Privacy Violation",
     "AGT-REG-016": "Regulatory Trigger",
+    "AGT-POL-017": "Organization Policy Switching",
 }
 
 # 8 ODP Keys

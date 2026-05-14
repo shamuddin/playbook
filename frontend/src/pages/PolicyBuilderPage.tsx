@@ -8,9 +8,11 @@ import {
   ChevronUp,
   GitCompare,
   Activity,
+  Save,
+  RotateCcw,
 } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api/v1'
 
 interface Template {
   id: string
@@ -41,6 +43,38 @@ interface DryRunResult {
   version: number
 }
 
+interface ConflictItem {
+  conflict_type: string
+  severity: string
+  message: string
+  expected_value?: string
+  actual_value?: string
+}
+
+interface ODPFormState {
+  severity_threshold: string
+  auto_contain_enabled: string
+  escalation_contacts: string
+  response_time_sla: string
+  forensic_level: string
+  notify_targets: string
+  compliance_report: string
+  record_threshold: string
+}
+
+function baselineToForm(base: Baseline): ODPFormState {
+  return {
+    severity_threshold: base.severity,
+    auto_contain_enabled: String(base.auto_contain_enabled),
+    escalation_contacts: JSON.stringify(base.escalation_contacts || []),
+    response_time_sla: String(base.response_time_sla_seconds),
+    forensic_level: base.forensic_level,
+    notify_targets: JSON.stringify(base.notify_targets || []),
+    compliance_report: String(base.compliance_report),
+    record_threshold: String(base.record_threshold),
+  }
+}
+
 export default function PolicyBuilderPage() {
   const [templates, setTemplates] = useState<Template[]>([])
   const [baselines, setBaselines] = useState<Baseline[]>([])
@@ -48,6 +82,11 @@ export default function PolicyBuilderPage() {
   const [loading, setLoading] = useState(true)
   const [expandedBaseline, setExpandedBaseline] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+
+  // ODP Editor state
+  const [editingOdps, setEditingOdps] = useState<Record<string, ODPFormState>>({})
+  const [savingOdp, setSavingOdp] = useState<string | null>(null)
+  const [odpConflicts, setOdpConflicts] = useState<Record<string, ConflictItem[]>>({})
 
   // Comparison state
   const [compareType, setCompareType] = useState<string>('AGT-DEL-001')
@@ -59,6 +98,7 @@ export default function PolicyBuilderPage() {
     Promise.all([
       fetch(`${API_BASE}/policy-builder/templates`).then((r) => r.json()),
       fetch(`${API_BASE}/policy-builder/nist-baseline`).then((r) => r.json()),
+      fetchConflicts().catch(() => {}),
     ])
       .then(([tplRes, baseRes]) => {
         setTemplates(tplRes || [])
@@ -81,10 +121,69 @@ export default function PolicyBuilderPage() {
       )
       const data = await res.json()
       alert(data.message || 'Template applied')
+      // Refresh baselines + conflicts after apply
+      await Promise.all([fetchBaselines(), fetchConflicts()])
     } catch {
       alert('Failed to apply template')
     }
     setApplying(false)
+  }
+
+  const fetchBaselines = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/policy-builder/nist-baseline`, {
+        credentials: 'include',
+      })
+      const data = await res.json()
+      setBaselines(data.data?.items || [])
+    } catch {}
+  }
+
+  const fetchConflicts = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/policy-builder/conflicts`, {
+        credentials: 'include',
+      })
+      if (!res.ok) return
+      const data: Record<string, ConflictItem[]> = await res.json()
+      setOdpConflicts(data)
+    } catch {
+      setOdpConflicts({})
+    }
+  }
+
+  const saveOdp = async (incidentType: string) => {
+    const form = editingOdps[incidentType]
+    if (!form) return
+    setSavingOdp(incidentType)
+    try {
+      const payload = {
+        severity_threshold: form.severity_threshold,
+        auto_contain_enabled: form.auto_contain_enabled === 'true',
+        escalation_contacts: form.escalation_contacts,
+        response_time_sla_seconds: parseInt(form.response_time_sla, 10) || 0,
+        forensic_level: form.forensic_level,
+        notify_targets: form.notify_targets,
+        compliance_report: form.compliance_report === 'true',
+        record_threshold: parseInt(form.record_threshold, 10) || 0,
+      }
+      const res = await fetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      })
+      if (res.ok) {
+        await Promise.all([fetchBaselines(), fetchConflicts()])
+        alert('ODP saved successfully')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.detail || 'Failed to save ODP')
+      }
+    } catch {
+      alert('Failed to save ODP')
+    }
+    setSavingOdp(null)
   }
 
   const runComparison = async () => {
@@ -343,41 +442,25 @@ export default function PolicyBuilderPage() {
 
               {expandedBaseline === base.incident_type && (
                 <div className="px-4 pb-4 border-t border-gray-100">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                    <BaselineField
-                      label="Severity Threshold"
-                      value={base.severity_threshold}
-                    />
-                    <BaselineField
-                      label="Auto Contain"
-                      value={base.auto_contain_enabled ? 'Enabled' : 'Disabled'}
-                      warning={!base.auto_contain_enabled}
-                    />
-                    <BaselineField
-                      label="Response SLA"
-                      value={`${base.response_time_sla_seconds}s`}
-                    />
-                    <BaselineField
-                      label="Forensic Level"
-                      value={base.forensic_level}
-                    />
-                    <BaselineField
-                      label="Record Threshold"
-                      value={base.record_threshold.toString()}
-                    />
-                    <BaselineField
-                      label="Compliance Report"
-                      value={base.compliance_report ? 'Required' : 'Optional'}
-                    />
-                    <BaselineField
-                      label="Escalation"
-                      value={`${base.escalation_contacts.length} contacts`}
-                    />
-                    <BaselineField
-                      label="Notify"
-                      value={`${base.notify_targets.length} targets`}
-                    />
-                  </div>
+                  <OdpEditorForm
+                    base={base}
+                    conflicts={odpConflicts[base.incident_type] || []}
+                    value={editingOdps[base.incident_type]}
+                    onChange={(form) =>
+                      setEditingOdps((prev) => ({
+                        ...prev,
+                        [base.incident_type]: form,
+                      }))
+                    }
+                    onSave={() => saveOdp(base.incident_type)}
+                    onReset={() =>
+                      setEditingOdps((prev) => ({
+                        ...prev,
+                        [base.incident_type]: baselineToForm(base),
+                      }))
+                    }
+                    saving={savingOdp === base.incident_type}
+                  />
                 </div>
               )}
             </div>
@@ -388,26 +471,193 @@ export default function PolicyBuilderPage() {
   )
 }
 
-function BaselineField({
-  label,
+function OdpEditorForm({
+  base,
+  conflicts,
   value,
-  warning,
+  onChange,
+  onSave,
+  onReset,
+  saving,
 }: {
-  label: string
-  value: string
-  warning?: boolean
+  base: Baseline
+  conflicts: ConflictItem[]
+  value?: ODPFormState
+  onChange: (form: ODPFormState) => void
+  onSave: () => void
+  onReset: () => void
+  saving: boolean
 }) {
+  const form = value ?? baselineToForm(base)
+  const hasConflicts = conflicts.length > 0
+
+  const update = (patch: Partial<ODPFormState>) => {
+    onChange({ ...form, ...patch })
+  }
+
   return (
-    <div>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p
-        className={`text-sm font-medium ${
-          warning ? 'text-orange-600 flex items-center gap-1' : 'text-gray-900'
-        }`}
-      >
-        {warning && <AlertTriangle className="w-3 h-3" />}
-        {value}
-      </p>
+    <div className="mt-4 space-y-4">
+      {hasConflicts && (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-4 h-4 text-red-600" />
+            <span className="text-sm font-semibold text-red-700">
+              {conflicts.length} Conflict{conflicts.length > 1 ? 's' : ''}
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {conflicts.map((c, i) => (
+              <li key={i} className="text-xs text-red-700">
+                <strong>{c.conflict_type}:</strong> {c.message}
+                {c.actual_value !== undefined && (
+                  <span className="text-red-500 ml-1">(got: {c.actual_value})</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Severity Threshold */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Severity Threshold
+          </label>
+          <select
+            value={form.severity_threshold}
+            onChange={(e) => update({ severity_threshold: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="critical">CRITICAL</option>
+            <option value="high">HIGH</option>
+            <option value="medium">MEDIUM</option>
+            <option value="low">LOW</option>
+          </select>
+        </div>
+
+        {/* Auto Contain */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Auto Contain
+          </label>
+          <select
+            value={form.auto_contain_enabled}
+            onChange={(e) => update({ auto_contain_enabled: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="true">Enabled</option>
+            <option value="false">Disabled</option>
+          </select>
+        </div>
+
+        {/* Response SLA */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Response SLA (seconds)
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={form.response_time_sla}
+            onChange={(e) => update({ response_time_sla: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        {/* Forensic Level */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Forensic Level
+          </label>
+          <select
+            value={form.forensic_level}
+            onChange={(e) => update({ forensic_level: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="full">FULL</option>
+            <option value="standard">STANDARD</option>
+            <option value="basic">BASIC</option>
+            <option value="none">NONE</option>
+          </select>
+        </div>
+
+        {/* Compliance Report */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Compliance Report
+          </label>
+          <select
+            value={form.compliance_report}
+            onChange={(e) => update({ compliance_report: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="true">Required</option>
+            <option value="false">Optional</option>
+          </select>
+        </div>
+
+        {/* Record Threshold */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Record Threshold
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={form.record_threshold}
+            onChange={(e) => update({ record_threshold: e.target.value })}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        {/* Escalation Contacts */}
+        <div className="lg:col-span-2">
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Escalation Contacts (JSON array)
+          </label>
+          <input
+            type="text"
+            value={form.escalation_contacts}
+            onChange={(e) => update({ escalation_contacts: e.target.value })}
+            placeholder='["security@company.com"]'
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        {/* Notify Targets */}
+        <div className="lg:col-span-2">
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Notify Targets (JSON array)
+          </label>
+          <input
+            type="text"
+            value={form.notify_targets}
+            onChange={(e) => update({ notify_targets: e.target.value })}
+            placeholder='["pagerduty"]'
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
+          <Save className="w-3.5 h-3.5" />
+          {saving ? 'Saving...' : 'Save ODPs'}
+        </button>
+        <button
+          onClick={onReset}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Reset to Baseline
+        </button>
+      </div>
     </div>
   )
 }

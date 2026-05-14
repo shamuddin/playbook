@@ -27,6 +27,7 @@ def _build_baselines() -> list[dict]:
         "AGT-BYP-014": IncidentSeverity.HIGH,
         "AGT-PRV-015": IncidentSeverity.HIGH,
         "AGT-REG-016": IncidentSeverity.HIGH,
+        "AGT-POL-017": IncidentSeverity.CRITICAL,
     }
 
     auto_contain_map = {

@@ -53,6 +53,7 @@ def _build_playbooks() -> list[dict]:
         "AGT-BYP-014": IncidentSeverity.HIGH,
         "AGT-PRV-015": IncidentSeverity.HIGH,
         "AGT-REG-016": IncidentSeverity.HIGH,
+        "AGT-POL-017": IncidentSeverity.CRITICAL,
     }
 
     for code, name in INCIDENT_TYPES.items():

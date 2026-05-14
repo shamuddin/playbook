@@ -279,6 +279,21 @@ _STATIC_RULES: List[Dict[str, any]] = [
         ],
         "threshold": 0.5,
     },
+    {
+        "rule_id": "RULE-POL-017",
+        "name": "Organization Policy Switching",
+        "incident_type": "AGT-POL-017",
+        "severity": "critical",
+        "patterns": [
+            r"policy\s*switch",
+            r"template\s*compare",
+            r"org\s*policy",
+            r"multi-tenant",
+            r"HIPAA\s*vs\s*SaaS",
+            r"FinTech\s*policy",
+        ],
+        "threshold": 0.5,
+    },
 ]
 
 

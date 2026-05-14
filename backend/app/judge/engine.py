@@ -114,6 +114,7 @@ class JudgeEngine:
         "AGT-BYP-014": ["OWASP_LLM_02", "NIST_AI_RMF_MEASURE_2_10"],
         "AGT-PRV-015": ["GDPR_ART_5", "HIPAA_164_502", "CCPA_1798_100"],
         "AGT-REG-016": ["SOX_404", "GDPR_ART_33", "NIST_AI_RMF_GOVERN_5"],
+        "AGT-POL-017": ["NIST_AI_RMF_GOVERN_1", "ISO_27001_A_5", "NIST_SP_800_53_AC_1"],
     }
 
     async def _resolve_odp(

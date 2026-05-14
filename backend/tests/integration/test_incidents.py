@@ -251,7 +251,7 @@ class TestIncidentEndpoints:
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["framework"] == "eu_ai_act"
-        assert data["total_incident_types"] == 16
+        assert data["total_incident_types"] == 17
         assert "coverage_percentage" in data
         assert "uncovered" in data
         assert "critical_gaps" in data

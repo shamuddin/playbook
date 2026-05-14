@@ -166,4 +166,14 @@ DETECTION_RULES_SEED = [
         "threshold": 0.5,
         "is_active": True,
     },
+    {
+        "rule_id": "RULE-POL-017",
+        "name": "Organization Policy Switching",
+        "rule_type": "signature",
+        "severity": IncidentSeverity.CRITICAL,
+        "incident_type": "AGT-POL-017",
+        "pattern": "policy\\s*switch|template\\s*compare|org\\s*policy|multi-tenant|HIPAA\\s*vs\\s*SaaS|FinTech\\s*policy",
+        "threshold": 0.5,
+        "is_active": True,
+    },
 ]

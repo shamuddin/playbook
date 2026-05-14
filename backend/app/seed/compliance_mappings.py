@@ -36,4 +36,9 @@ COMPLIANCE_MAPPINGS_SEED = [
     {"incident_type": "AGT-FIN-002", "framework": "soc2", "control_id": "CC7.2", "control_name": "System Monitoring", "risk_level": "high", "confidence": 0.85},
     {"incident_type": "AGT-EXT-005", "framework": "soc2", "control_id": "CC7.1", "control_name": "Detect Security Events", "risk_level": "critical", "confidence": 0.95},
     {"incident_type": "AGT-REG-016", "framework": "soc2", "control_id": "CC1.3", "control_name": "Management Communication", "risk_level": "high", "confidence": 0.85},
+
+    # Policy Switching demo mappings
+    {"incident_type": "AGT-POL-017", "framework": "nist_ai_rmf", "control_id": "GOVERN-1", "control_name": "Policies and Procedures", "risk_level": "high", "confidence": 0.9},
+    {"incident_type": "AGT-POL-017", "framework": "nist_sp_800_53", "control_id": "AC-1", "control_name": "Access Control Policy and Procedures", "risk_level": "high", "confidence": 0.85},
+    {"incident_type": "AGT-POL-017", "framework": "soc2", "control_id": "CC5.1", "control_name": "Control Environment", "risk_level": "medium", "confidence": 0.8},
 ]
