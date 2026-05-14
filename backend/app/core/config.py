@@ -112,6 +112,17 @@ class Settings(BaseSettings):
     # SupraWall
     suprawall_webhook_url: Optional[str] = None
 
+    # Notifications
+    slack_webhook_url: Optional[str] = None
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from: Optional[str] = None
+    pagerduty_routing_key: Optional[str] = None
+    notification_default_channels: List[str] = Field(default_factory=lambda: ["slack"])
+    notification_default_recipients: List[str] = Field(default_factory=list)
+
     # Policy Builder
     policy_builder_enabled: bool = True
     nist_baseline_path: str = "./data/nist_baselines.json"

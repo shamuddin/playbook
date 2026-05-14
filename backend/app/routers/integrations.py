@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Incident, SuprawallEvent
-from app.schemas import StandardResponse
+from app.schemas import NotificationTestRequest, NotificationTestResponse, StandardResponse
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -156,4 +157,33 @@ async def correlate_suprawall_with_incident(
             "correlation_count": len(sw_events),
         },
         message=f"Found {len(sw_events)} correlated SupraWall events",
+    )
+
+
+@router.post("/notifications/test", response_model=StandardResponse)
+async def test_notification(
+    request: NotificationTestRequest,
+) -> StandardResponse:
+    """Send a test notification to a configured channel.
+
+    Used to verify that Slack, Email, or PagerDuty integrations are working.
+    """
+    service = NotificationService()
+    message = {
+        "title": request.message,
+        "body": f"Test notification sent via {request.channel}",
+        "severity": request.severity or "high",
+        "incident_id": request.incident_id or "TEST-001",
+    }
+    result = await service.send(request.channel, message)
+    await service.close()
+
+    return StandardResponse(
+        success=result.success,
+        data=NotificationTestResponse(
+            channel=result.channel,
+            success=result.success,
+            detail=result.detail,
+        ).model_dump(),
+        message="Notification sent" if result.success else "Notification failed",
     )

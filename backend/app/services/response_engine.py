@@ -5,6 +5,7 @@ Fail-open per action: individual failures logged, execution continues.
 """
 
 import asyncio
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -162,7 +163,35 @@ class ResponseEngine:
 
             elif action_type == PlaybookActionType.NOTIFY:
                 targets = action.parameters.get("targets", ["#security-alerts"])
-                stdout = f"Notification sent to {targets} for incident {incident.incident_id}"
+                from app.services.notification_service import NotificationService
+                from app.core.config import get_settings
+
+                service = NotificationService()
+                settings = get_settings()
+                channels = action.parameters.get("channels", settings.notification_default_channels)
+                msg = {
+                    "title": f"PLAYBOOK Alert: {incident.severity.upper()} {incident.incident_type}",
+                    "body": (
+                        f"Incident: {incident.incident_id}\n"
+                        f"Severity: {incident.severity}\n"
+                        f"Category: {incident.category}\n"
+                        f"Confidence: {incident.confidence:.2f}\n"
+                        f"Targets: {targets}"
+                    ),
+                    "severity": incident.severity,
+                    "incident_id": incident.incident_id,
+                }
+                results = await service.send_multi(channels=channels, message=msg)
+                await service.close()
+                success_count = sum(1 for r in results if r.success)
+                stdout = json.dumps(
+                    {
+                        "sent": success_count,
+                        "total": len(results),
+                        "channels": [r.channel for r in results],
+                        "details": [{"channel": r.channel, "success": r.success, "detail": r.detail} for r in results],
+                    }
+                )
 
             elif action_type == PlaybookActionType.FORENSICS:
                 stdout = f"Forensics capture initiated for incident {incident.incident_id}"

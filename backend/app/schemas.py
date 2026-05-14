@@ -21,6 +21,23 @@ class ErrorResponse(BaseModel):
 
 
 # ============================================================================
+# Notifications
+# ============================================================================
+
+class NotificationTestRequest(BaseModel):
+    channel: str = "slack"
+    message: str = "Test notification from PLAYBOOK"
+    severity: Optional[str] = "high"
+    incident_id: Optional[str] = None
+
+
+class NotificationTestResponse(BaseModel):
+    channel: str
+    success: bool
+    detail: str
+
+
+# ============================================================================
 # Health
 # ============================================================================
 
