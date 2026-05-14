@@ -121,7 +121,8 @@ class Settings(BaseSettings):
 
     @property
     def gemini_enabled(self) -> bool:
-        return bool(self.gemini_api_key) and not self.demo_mode
+        # Supports both API key and ADC (Vertex AI) auth modes
+        return (bool(self.gemini_api_key) or bool(self.gcp_project_id)) and not self.demo_mode
 
 
 @lru_cache
