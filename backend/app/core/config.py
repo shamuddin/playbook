@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     database_pool_size: int = 5
     database_max_overflow: int = 10
 
+    @field_validator("database_pool_size")
+    @classmethod
+    def validate_pool_size(cls, v: int) -> int:
+        if v < 1 or v > 20:
+            raise ValueError("database_pool_size must be between 1 and 20")
+        return v
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
