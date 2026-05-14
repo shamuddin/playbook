@@ -94,6 +94,62 @@ print(verdict["verdict"])  # BLOCK
 await client.close()
 ```
 
+## Framework Integrations
+
+### LangChain
+
+Install the optional dependency:
+
+```bash
+pip install playbook-guard[langchain]
+```
+
+Use the callback handler to judge every tool and LLM call:
+
+```python
+from playbook_sdk.middleware.langchain import PlaybookCallbackHandler
+from langchain.agents import initialize_agent
+
+handler = PlaybookCallbackHandler(agent_id="customer-service-agent-01")
+
+agent = initialize_agent(
+    tools,
+    llm,
+    callbacks=[handler],
+)
+```
+
+The handler intercepts `on_tool_start` and `on_llm_start`, sends action
+metadata to the Judge Layer, and raises `GuardBlockedError` or
+`GuardQuarantinedError` before the action executes.
+
+> **Note:** The callback handler uses `asyncio.run()` internally and works
+> best with **synchronous** LangChain chains. For async chains, apply
+> `@playbook_sdk.guard` to individual tools instead.
+
+### CrewAI
+
+Install the optional dependency:
+
+```bash
+pip install playbook-guard[crewai]
+```
+
+Wrap CrewAI tasks with the guard decorator:
+
+```python
+from playbook_sdk.middleware.crewai import crewai_guard
+from crewai import task
+
+@crewai_guard(agent_id="researcher-001")
+@task
+def research_task(agent):
+    return agent.run("Find latest AI safety papers")
+```
+
+The decorator automatically extracts the agent ID from the CrewAI
+`Agent.role` attribute when the task receives an agent argument.
+
 ## Verdicts
 
 The Judge Layer returns one of these verdicts:

@@ -55,4 +55,8 @@ __all__ = [
     "init",
     "get_client",
     "__version__",
+    # Middleware (lazy-imported)
+    "PlaybookCallbackHandler",
+    "crewai_guard",
+    "CrewAIGuard",
 ]
