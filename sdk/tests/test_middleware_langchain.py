@@ -128,3 +128,20 @@ class TestPlaybookCallbackHandler:
             mock_judge.return_value = {"verdict": "ALLOW"}
             handler.on_tool_start(serialized=None, input_str="x")
             assert mock_judge.call_args.kwargs["action_details"]["tool"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_close(self):
+        handler = self._make_handler()
+        with patch.object(handler.client, "close", new_callable=AsyncMock) as mock_close:
+            await handler.close()
+            mock_close.assert_awaited_once()
+
+    def test_placeholder_without_langchain(self):
+        with patch.dict("sys.modules", {"langchain": None, "langchain.callbacks": None, "langchain.callbacks.base": None}):
+            import importlib
+            from playbook_sdk.middleware import langchain as lc_mod
+            importlib.reload(lc_mod)
+            with pytest.raises(ImportError, match="LangChain integration requires"):
+                lc_mod.PlaybookCallbackHandler()
+            # Restore module state for other tests
+            importlib.reload(lc_mod)

@@ -27,6 +27,19 @@ __version__ = "0.1.0"
 _global_client: PlaybookClient | None = None
 
 
+def __getattr__(name: str):
+    if name == "PlaybookCallbackHandler":
+        from .middleware.langchain import PlaybookCallbackHandler
+        return PlaybookCallbackHandler
+    if name == "crewai_guard":
+        from .middleware.crewai import crewai_guard
+        return crewai_guard
+    if name == "CrewAIGuard":
+        from .middleware.crewai import CrewAIGuard
+        return CrewAIGuard
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def init(endpoint: str | None = None, api_key: str | None = None) -> None:
     """Initialize the global PLAYBOOK client."""
     global _global_client

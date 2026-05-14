@@ -157,3 +157,81 @@ class TestCrewAIGuard:
 
             call_kwargs = client.judge.call_args.kwargs
             assert call_kwargs["agent_id"] == "fallback-agent"
+
+    def test_sync_block_raises_error(self):
+        with patch("playbook_sdk.middleware.crewai.PlaybookClient") as MockClient:
+            client = AsyncMock()
+            client.judge.return_value = {"verdict": "BLOCK", "reason": "Sync block"}
+            MockClient.return_value = client
+
+            g = CrewAIGuard(agent_id="crew-test", endpoint="http://test")
+
+            @g
+            def my_sync_task():
+                return "should not reach"
+
+            with pytest.raises(GuardBlockedError, match="Sync block"):
+                my_sync_task()
+
+    def test_sync_quarantine_raises_error(self):
+        with patch("playbook_sdk.middleware.crewai.PlaybookClient") as MockClient:
+            client = AsyncMock()
+            client.judge.return_value = {"verdict": "QUARANTINE", "reason": "Sync quarantine"}
+            MockClient.return_value = client
+
+            g = CrewAIGuard(agent_id="crew-test", endpoint="http://test")
+
+            @g
+            def my_sync_task():
+                return "should not reach"
+
+            with pytest.raises(GuardQuarantinedError, match="Sync quarantine"):
+                my_sync_task()
+
+    @pytest.mark.asyncio
+    async def test_on_quarantine_callback(self):
+        with patch("playbook_sdk.middleware.crewai.PlaybookClient") as MockClient:
+            client = AsyncMock()
+            client.judge.return_value = {"verdict": "QUARANTINE", "reason": "Unsafe"}
+            MockClient.return_value = client
+
+            async def handle_quarantine(verdict, *args, **kwargs):
+                return {"quarantined": True, "reason": verdict["reason"]}
+
+            g = CrewAIGuard(
+                agent_id="crew-test", endpoint="http://test", on_quarantine=handle_quarantine
+            )
+
+            @g
+            async def my_task():
+                return "should not reach"
+
+            result = await my_task()
+            assert result["quarantined"] is True
+
+    @pytest.mark.asyncio
+    async def test_judge_failure_escalates(self):
+        with patch("playbook_sdk.middleware.crewai.PlaybookClient") as MockClient:
+            client = AsyncMock()
+            client.judge.side_effect = Exception("Network down")
+            MockClient.return_value = client
+
+            g = CrewAIGuard(agent_id="crew-test", endpoint="http://test")
+
+            @g
+            async def my_task():
+                return "proceeded despite failure"
+
+            result = await my_task()
+            assert result == "proceeded despite failure"
+
+    @pytest.mark.asyncio
+    async def test_close(self):
+        with patch("playbook_sdk.middleware.crewai.PlaybookClient") as MockClient:
+            client = AsyncMock()
+            client.close = AsyncMock()
+            MockClient.return_value = client
+
+            g = CrewAIGuard(agent_id="crew-test", endpoint="http://test")
+            await g.close()
+            client.close.assert_awaited_once()

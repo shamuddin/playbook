@@ -67,12 +67,17 @@ class CrewAIGuard:
             "action_summary": f"{func_name}({', '.join(repr(a)[:100] for a in args)})",
             "framework": "crewai",
         }
-        result = await self.client.judge(
-            agent_id=resolved_id,
-            action_type=self.action_type,
-            action_details=action_details,
-        )
-        return result
+        try:
+            result = await self.client.judge(
+                agent_id=resolved_id,
+                action_type=self.action_type,
+                action_details=action_details,
+            )
+            return result
+        except Exception as exc:
+            logger.warning("Judge evaluation failed for %s: %s", func_name, exc)
+            # Fail-open: let the action proceed
+            return {"verdict": "ESCALATE", "reason": str(exc)}
 
     def __call__(self, func: Callable) -> Callable:
         @functools.wraps(func)
@@ -142,6 +147,11 @@ class CrewAIGuard:
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
+
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        await self.client.close()
 
 
 def crewai_guard(

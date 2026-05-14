@@ -199,3 +199,7 @@ else:
                 action_details,
             )
             self._handle_verdict(verdict, f"llm:{model_name}")
+
+        async def close(self) -> None:
+            """Close the underlying HTTP client."""
+            await self.client.close()
