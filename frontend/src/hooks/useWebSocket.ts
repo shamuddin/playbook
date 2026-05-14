@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/incidents'
+import { getWsUrl, getSoundAlerts } from '../utils/config'
 
 interface WebSocketMessage {
   event_type: string
@@ -13,6 +12,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
+    const WS_URL = getWsUrl()
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
 
@@ -28,8 +28,23 @@ export function useWebSocket() {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
+        const data = JSON.parse(event.data) as WebSocketMessage
         setMessages((prev) => [data, ...prev].slice(0, 50))
+
+        // Sound alert for CRITICAL incidents
+        if (
+          data.event_type === 'incident_detected' &&
+          data.severity === 'critical' &&
+          getSoundAlerts()
+        ) {
+          try {
+            const audio = new Audio('/alert.mp3')
+            audio.volume = 0.5
+            audio.play().catch(() => {})
+          } catch {
+            // ignore audio errors
+          }
+        }
       } catch {
         // ignore malformed messages
       }

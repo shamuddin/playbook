@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -15,8 +15,9 @@ import {
   FileText,
 } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { getApiBase, getRefreshInterval } from '../utils/config'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE = getApiBase()
 
 interface DashboardData {
   overview: {
@@ -72,7 +73,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const { connected, messages } = useWebSocket()
 
-  useEffect(() => {
+  const fetchDashboard = useCallback(() => {
     fetch(`${API_BASE}/dashboard`)
       .then((r) => r.json())
       .then((res) => {
@@ -81,6 +82,15 @@ export default function DashboardPage() {
       })
       .catch(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetchDashboard()
+    const intervalSeconds = getRefreshInterval()
+    if (intervalSeconds > 0) {
+      const id = setInterval(fetchDashboard, intervalSeconds * 1000)
+      return () => clearInterval(id)
+    }
+  }, [fetchDashboard])
 
   if (loading) {
     return (

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
+import { getApiBase, getPageSize } from '../utils/config'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE = getApiBase()
 
 interface Incident {
   id: string
@@ -22,7 +23,7 @@ export default function IncidentsPage() {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(20)
+  const [pageSize] = useState(() => getPageSize())
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
