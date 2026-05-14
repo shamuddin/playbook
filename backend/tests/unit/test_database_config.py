@@ -39,6 +39,13 @@ class TestDatabaseConfig:
         assert _is_sqlite("sqlite+aiosqlite:///./test.db") is True
         assert _is_sqlite("postgresql+asyncpg://localhost/db") is False
 
+    def test_is_sqlite_no_false_positive_in_path(self):
+        from app.database import _is_sqlite
+
+        # "sqlite" in the password or path should NOT match
+        assert _is_sqlite("postgresql+asyncpg://sqlite:pass@localhost/db") is False
+        assert _is_sqlite("postgresql+asyncpg://user:pass@localhost/sqlite_db") is False
+
     def test_sqlite_engine_uses_null_pool(self):
         with patch("app.database.create_async_engine") as mock_engine:
             from app.database import _build_engine
@@ -56,6 +63,21 @@ class TestDatabaseConfig:
             assert "poolclass" not in call.kwargs
             assert call.kwargs.get("pool_size") == 5
 
+    def test_build_engine_passes_custom_pool_params(self):
+        with patch("app.database.create_async_engine") as mock_engine:
+            from app.database import _build_engine
+            _build_engine(
+                "postgresql+asyncpg://user:pass@localhost/playbook",
+                debug=True,
+                pool_size=10,
+                max_overflow=20,
+            )
+
+            call = mock_engine.call_args
+            assert call.kwargs.get("echo") is True
+            assert call.kwargs.get("pool_size") == 10
+            assert call.kwargs.get("max_overflow") == 20
+
     def test_config_pool_size_validation(self):
         from app.core.config import Settings
 
@@ -70,3 +92,11 @@ class TestDatabaseConfig:
         assert s.database_pool_size == 5
         s = Settings(database_pool_size=20)
         assert s.database_pool_size == 20
+
+    def test_settings_defaults(self):
+        from app.core.config import Settings
+
+        s = Settings()
+        assert s.database_url == "sqlite:///./data/playbooks.db"
+        assert s.database_pool_size == 5
+        assert s.database_max_overflow == 10

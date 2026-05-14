@@ -17,10 +17,12 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Convert to async SQLite URL
+# Normalize async driver prefixes
 database_url = settings.database_url
-if database_url.startswith("sqlite:///"):
+if database_url.startswith("sqlite:///") and "+aiosqlite" not in database_url:
     database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+elif database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
+    database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
 
 config.set_main_option("sqlalchemy.url", database_url)
 
@@ -46,10 +48,14 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
+    url = config.get_main_option("sqlalchemy.url", "")
+    kwargs = {"prefix": "sqlalchemy."}
+    if "sqlite" in url:
+        kwargs["poolclass"] = pool.NullPool
+
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool if "sqlite" in config.get_main_option("sqlalchemy.url", "") else None,
+        **kwargs,
     )
 
     async with connectable.connect() as connection:

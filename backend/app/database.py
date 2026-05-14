@@ -19,7 +19,7 @@ def _normalize_database_url(url: str) -> str:
 
 
 def _is_sqlite(url: str) -> bool:
-    return "sqlite" in url
+    return "sqlite" in url.split("://", 1)[0]
 
 
 def _build_engine(
