@@ -2,15 +2,17 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.database import AsyncSessionLocal, engine
 from app.models import Base
+from app.core.security import get_current_user
 from app.routers import (
     agents,
+    auth,
     compliance,
     dashboard,
     demo,
@@ -133,28 +135,34 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS — restricted to configured frontend origin
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+    max_age=600,
 )
 
-# Routers
+# Routers — public first (no auth required)
 app.include_router(health.router, prefix=settings.api_prefix)
-app.include_router(incidents.router, prefix=settings.api_prefix)
-app.include_router(judge.router, prefix=settings.api_prefix)
-app.include_router(playbooks.router, prefix=settings.api_prefix)
-app.include_router(policy_builder.router, prefix=settings.api_prefix)
-app.include_router(forensics.router, prefix=settings.api_prefix)
-app.include_router(compliance.router, prefix=settings.api_prefix)
-app.include_router(agents.router, prefix=settings.api_prefix)
-app.include_router(dashboard.router, prefix=settings.api_prefix)
+app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(demo.router, prefix=settings.api_prefix)
-app.include_router(integrations.router, prefix=settings.api_prefix)
-app.include_router(websocket.router, prefix=settings.api_prefix)
+
+# Protected routers (JWT auth required)
+_auth_dep = [Depends(get_current_user)]
+app.include_router(incidents.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(judge.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(playbooks.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(policy_builder.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(forensics.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(compliance.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(agents.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(dashboard.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(integrations.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(websocket.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 
 
 @app.get("/")

@@ -11,8 +11,8 @@ from app.models import Incident, TimelineEvent
 class TestIncidentEndpoints:
     """Integration tests for the incidents router."""
 
-    async def test_create_incident(self, async_client: AsyncClient, db_session: AsyncSession):
-        response = await async_client.post("/api/v1/incidents", json={
+    async def test_create_incident(self, auth_async_client: AsyncClient, db_session: AsyncSession):
+        response = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-DEL-001",
             "severity": "critical",
             "confidence": 0.95,
@@ -28,8 +28,8 @@ class TestIncidentEndpoints:
         assert data["incident_id"].startswith("INC-")
         assert data["bypass_detected"] is False
 
-    async def test_ingest_event_creates_incident(self, async_client: AsyncClient):
-        response = await async_client.post("/api/v1/incidents/ingest", json={
+    async def test_ingest_event_creates_incident(self, auth_async_client: AsyncClient):
+        response = await auth_async_client.post("/api/v1/incidents/ingest", json={
             "source": "generic",
             "event_data": {
                 "event_id": "evt-drop-001",
@@ -45,9 +45,9 @@ class TestIncidentEndpoints:
         assert data["confidence"] > 0
         assert data["incident_id"].startswith("INC-")
 
-    async def test_ingest_event_no_match(self, async_client: AsyncClient):
+    async def test_ingest_event_no_match(self, auth_async_client: AsyncClient):
         """Events with no rule match should create a coverage gap incident."""
-        response = await async_client.post("/api/v1/incidents/ingest", json={
+        response = await auth_async_client.post("/api/v1/incidents/ingest", json={
             "source": "generic",
             "event_data": {
                 "event_id": "evt-safe-001",
@@ -62,53 +62,53 @@ class TestIncidentEndpoints:
         assert data["severity"] == "low"
         assert data["category"] == "coverage"
 
-    async def test_list_incidents(self, async_client: AsyncClient):
+    async def test_list_incidents(self, auth_async_client: AsyncClient):
         # Create two incidents
-        await async_client.post("/api/v1/incidents", json={
+        await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-DEL-001",
             "severity": "critical",
             "confidence": 0.9,
             "category": "integrity",
         })
-        await async_client.post("/api/v1/incidents", json={
+        await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-INJ-006",
             "severity": "high",
             "confidence": 0.8,
             "category": "injection",
         })
 
-        response = await async_client.get("/api/v1/incidents")
+        response = await auth_async_client.get("/api/v1/incidents")
         assert response.status_code == 200
         data = response.json()
         assert data["total"] >= 2
         assert len(data["data"]) >= 2
         assert data["page"] == 1
 
-    async def test_list_incidents_with_filter(self, async_client: AsyncClient):
+    async def test_list_incidents_with_filter(self, auth_async_client: AsyncClient):
         # Create filtered incident
-        await async_client.post("/api/v1/incidents", json={
+        await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-CRE-008",
             "severity": "critical",
             "confidence": 0.9,
             "category": "secrets",
         })
 
-        response = await async_client.get("/api/v1/incidents?severity=critical")
+        response = await auth_async_client.get("/api/v1/incidents?severity=critical")
         assert response.status_code == 200
         data = response.json()
         assert data["total"] >= 1
         for inc in data["data"]:
             assert inc["severity"] == "critical"
 
-    async def test_list_incidents_pagination(self, async_client: AsyncClient):
-        response = await async_client.get("/api/v1/incidents?page=1&page_size=1")
+    async def test_list_incidents_pagination(self, auth_async_client: AsyncClient):
+        response = await auth_async_client.get("/api/v1/incidents?page=1&page_size=1")
         assert response.status_code == 200
         data = response.json()
         assert data["page_size"] == 1
         assert len(data["data"]) <= 1
 
-    async def test_get_incident(self, async_client: AsyncClient):
-        create_resp = await async_client.post("/api/v1/incidents", json={
+    async def test_get_incident(self, auth_async_client: AsyncClient):
+        create_resp = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-EXT-005",
             "severity": "critical",
             "confidence": 0.9,
@@ -116,19 +116,19 @@ class TestIncidentEndpoints:
         })
         incident_id = create_resp.json()["incident_id"]
 
-        response = await async_client.get(f"/api/v1/incidents/{incident_id}")
+        response = await auth_async_client.get(f"/api/v1/incidents/{incident_id}")
         assert response.status_code == 200
         data = response.json()
         assert data["incident_id"] == incident_id
         assert data["category"] == "exfiltration"
 
-    async def test_get_incident_not_found(self, async_client: AsyncClient):
-        response = await async_client.get("/api/v1/incidents/INC-NONEXISTENT")
+    async def test_get_incident_not_found(self, auth_async_client: AsyncClient):
+        response = await auth_async_client.get("/api/v1/incidents/INC-NONEXISTENT")
         assert response.status_code == 404
 
-    async def test_classify_incident(self, async_client: AsyncClient, db_session: AsyncSession):
+    async def test_classify_incident(self, auth_async_client: AsyncClient, db_session: AsyncSession):
         # First ingest an event
-        ingest_resp = await async_client.post("/api/v1/incidents/ingest", json={
+        ingest_resp = await auth_async_client.post("/api/v1/incidents/ingest", json={
             "source": "generic",
             "event_data": {
                 "event_id": "evt-classify-001",
@@ -140,15 +140,15 @@ class TestIncidentEndpoints:
         incident_id = ingest_resp.json()["incident_id"]
 
         # Re-classify
-        response = await async_client.post(f"/api/v1/incidents/{incident_id}/classify")
+        response = await auth_async_client.post(f"/api/v1/incidents/{incident_id}/classify")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "classified"
         assert data["category"] == "exfiltration"
 
-    async def test_get_timeline(self, async_client: AsyncClient):
+    async def test_get_timeline(self, auth_async_client: AsyncClient):
         # Create incident
-        create_resp = await async_client.post("/api/v1/incidents", json={
+        create_resp = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-DEL-001",
             "severity": "critical",
             "confidence": 0.9,
@@ -156,15 +156,15 @@ class TestIncidentEndpoints:
         })
         incident_id = create_resp.json()["incident_id"]
 
-        response = await async_client.get(f"/api/v1/incidents/{incident_id}/timeline")
+        response = await auth_async_client.get(f"/api/v1/incidents/{incident_id}/timeline")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) >= 1
         assert data[0]["stage"] == "detect"
 
-    async def test_respond_to_incident(self, async_client: AsyncClient, seeded_db):
-        create_resp = await async_client.post("/api/v1/incidents", json={
+    async def test_respond_to_incident(self, auth_async_client: AsyncClient, seeded_db):
+        create_resp = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-DEL-001",
             "severity": "critical",
             "confidence": 0.9,
@@ -172,7 +172,7 @@ class TestIncidentEndpoints:
         })
         incident_id = create_resp.json()["incident_id"]
 
-        response = await async_client.post(f"/api/v1/incidents/{incident_id}/respond")
+        response = await auth_async_client.post(f"/api/v1/incidents/{incident_id}/respond")
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -180,16 +180,16 @@ class TestIncidentEndpoints:
         assert data["data"]["status"] in ("completed", "partial", "failed")
         assert data["data"]["steps_total"] > 0
 
-    async def test_ingest_invalid_event(self, async_client: AsyncClient):
-        response = await async_client.post("/api/v1/incidents/ingest", json={
+    async def test_ingest_invalid_event(self, auth_async_client: AsyncClient):
+        response = await auth_async_client.post("/api/v1/incidents/ingest", json={
             "source": "generic",
             "event_data": "not a dict",
         })
         assert response.status_code == 422
 
-    async def test_classify_without_metadata(self, async_client: AsyncClient):
+    async def test_classify_without_metadata(self, auth_async_client: AsyncClient):
         # Create incident manually (no metadata)
-        create_resp = await async_client.post("/api/v1/incidents", json={
+        create_resp = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-GAP-012",
             "severity": "low",
             "confidence": 0.1,
@@ -197,15 +197,15 @@ class TestIncidentEndpoints:
         })
         incident_id = create_resp.json()["incident_id"]
 
-        response = await async_client.post(f"/api/v1/incidents/{incident_id}/classify")
+        response = await auth_async_client.post(f"/api/v1/incidents/{incident_id}/classify")
         assert response.status_code == 422
         assert "metadata" in response.json()["detail"].lower()
 
-    async def test_get_incident_forensics(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_get_incident_forensics(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test the canonical /incidents/{id}/forensics endpoint."""
         # Create incident
-        create_resp = await async_client.post("/api/v1/incidents", json={
+        create_resp = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-DEL-001",
             "severity": "critical",
             "confidence": 0.95,
@@ -215,7 +215,7 @@ class TestIncidentEndpoints:
         incident_id = create_resp.json()["incident_id"]
 
         # Get forensics (auto-generates on first request)
-        response = await async_client.get(f"/api/v1/incidents/{incident_id}/forensics")
+        response = await auth_async_client.get(f"/api/v1/incidents/{incident_id}/forensics")
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["package_id"].startswith("EVIDENCE-")
@@ -223,10 +223,10 @@ class TestIncidentEndpoints:
         assert "manifest" in data
         assert "signature" in data
 
-    async def test_get_incident_forensics_stix(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_get_incident_forensics_stix(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test STIX 2.1 export via incidents endpoint."""
-        create_resp = await async_client.post("/api/v1/incidents", json={
+        create_resp = await auth_async_client.post("/api/v1/incidents", json={
             "incident_type": "AGT-EXT-005",
             "severity": "high",
             "confidence": 0.9,
@@ -235,7 +235,7 @@ class TestIncidentEndpoints:
         })
         incident_id = create_resp.json()["incident_id"]
 
-        response = await async_client.get(
+        response = await auth_async_client.get(
             f"/api/v1/incidents/{incident_id}/forensics?format=stix"
         )
         assert response.status_code == 200
@@ -244,10 +244,10 @@ class TestIncidentEndpoints:
         assert data["spec_version"] == "2.1"
         assert len(data["objects"]) > 0
 
-    async def test_compliance_gap_analysis(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_compliance_gap_analysis(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test compliance gap analysis endpoint."""
-        response = await async_client.get("/api/v1/compliance/gap-analysis?framework=eu_ai_act")
+        response = await auth_async_client.get("/api/v1/compliance/gap-analysis?framework=eu_ai_act")
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["framework"] == "eu_ai_act"
@@ -256,10 +256,10 @@ class TestIncidentEndpoints:
         assert "uncovered" in data
         assert "critical_gaps" in data
 
-    async def test_dashboard_stats(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_dashboard_stats(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test dashboard aggregate statistics endpoint."""
-        response = await async_client.get("/api/v1/dashboard")
+        response = await auth_async_client.get("/api/v1/dashboard")
         assert response.status_code == 200
         data = response.json()["data"]
         assert "overview" in data
@@ -268,56 +268,56 @@ class TestIncidentEndpoints:
         assert "judge_layer" in data
         assert data["period"] == "24h"
 
-    async def test_dashboard_alerts(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_dashboard_alerts(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test dashboard active alerts endpoint."""
-        response = await async_client.get("/api/v1/dashboard/alerts")
+        response = await auth_async_client.get("/api/v1/dashboard/alerts")
         assert response.status_code == 200
         data = response.json()["data"]
         assert "alerts" in data
 
-    async def test_list_agents(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_list_agents(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test agent listing endpoint."""
-        response = await async_client.get("/api/v1/agents")
+        response = await auth_async_client.get("/api/v1/agents")
         assert response.status_code == 200
         data = response.json()["data"]
         assert "items" in data
         assert "total" in data
 
-    async def test_policy_builder_baselines(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_policy_builder_baselines(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test policy builder NIST baselines endpoint."""
-        response = await async_client.get("/api/v1/policy-builder/nist-baseline")
+        response = await auth_async_client.get("/api/v1/policy-builder/nist-baseline")
         assert response.status_code == 200
         data = response.json()["data"]
         assert isinstance(data, dict)
         assert "items" in data
         assert len(data["items"]) > 0
 
-    async def test_policy_builder_templates(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_policy_builder_templates(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test policy builder industry templates endpoint."""
-        response = await async_client.get("/api/v1/policy-builder/templates")
+        response = await auth_async_client.get("/api/v1/policy-builder/templates")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) > 0
 
-    async def test_policy_builder_resolve(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_policy_builder_resolve(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test policy builder resolved policy endpoint."""
-        response = await async_client.get("/api/v1/policy-builder/resolve/AGT-DEL-001")
+        response = await auth_async_client.get("/api/v1/policy-builder/resolve/AGT-DEL-001")
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["incident_type"] == "AGT-DEL-001"
         assert "baseline" in data
         assert "effective_policy" in data
 
-    async def test_policy_builder_odp_update(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_policy_builder_odp_update(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test ODP update with validation."""
-        response = await async_client.put(
+        response = await auth_async_client.put(
             "/api/v1/policy-builder/odps/AGT-DEL-001",
             json={"odps": {"severity_threshold": "HIGH", "response_time_sla": "900"}},
         )
@@ -326,20 +326,20 @@ class TestIncidentEndpoints:
         assert data["odps_applied"] == 2
         assert "resolved_policy" in data
 
-    async def test_policy_builder_validate(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_policy_builder_validate(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test policy validation endpoint."""
-        response = await async_client.post("/api/v1/policy-builder/validate")
+        response = await auth_async_client.post("/api/v1/policy-builder/validate")
         assert response.status_code == 200
         data = response.json()["data"]
         assert "valid" in data
         assert "total_conflicts" in data
         assert "results" in data
 
-    async def test_policy_builder_bulk_update(self, seeded_async_client: AsyncClient):
-        async_client = seeded_async_client
+    async def test_policy_builder_bulk_update(self, auth_async_client: AsyncClient):
+        async_client = auth_async_client
         """Test bulk ODP update across incident types."""
-        response = await async_client.put(
+        response = await auth_async_client.put(
             "/api/v1/policy-builder/odps/bulk",
             json={
                 "AGT-DEL-001": {"severity_threshold": "CRITICAL"},

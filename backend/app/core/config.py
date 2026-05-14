@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,9 +40,21 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",")]
 
     # JWT
-    secret_key: str = "change-me-in-production"
+    secret_key: str = Field(default="playbook-dev-secret-key-change-in-production-32", min_length=32)
     access_token_expire_minutes: int = 60
     algorithm: str = "HS256"
+
+    @field_validator("secret_key")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        FORBIDDEN = {"change-me-in-production", "changeme", "secret", "admin", "password", "123456", "playbook"}
+        lowered = v.lower().strip()
+        if lowered in FORBIDDEN or len(v) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters and not a common default. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        return v
 
     # Gemini / Vertex AI
     gemini_api_key: Optional[str] = None

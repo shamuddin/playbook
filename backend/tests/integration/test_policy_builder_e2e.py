@@ -10,8 +10,8 @@ class TestPolicyBuilderAPI:
     """E2E tests for /policy-builder endpoints."""
 
     @pytest.mark.asyncio
-    async def test_list_baselines(self, seeded_async_client):
-        res = await seeded_async_client.get("/api/v1/policy-builder/nist-baseline")
+    async def test_list_baselines(self, auth_async_client):
+        res = await auth_async_client.get("/api/v1/policy-builder/nist-baseline")
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is True
@@ -22,20 +22,20 @@ class TestPolicyBuilderAPI:
         assert "AGT-POL-017" in types
 
     @pytest.mark.asyncio
-    async def test_get_baseline_by_type(self, seeded_async_client):
-        res = await seeded_async_client.get("/api/v1/policy-builder/nist-baseline/AGT-DEL-001")
+    async def test_get_baseline_by_type(self, auth_async_client):
+        res = await auth_async_client.get("/api/v1/policy-builder/nist-baseline/AGT-DEL-001")
         assert res.status_code == 200
         data = res.json()
         assert data["data"]["incident_type"] == "AGT-DEL-001"
         assert data["data"]["severity"] == "critical"
 
     @pytest.mark.asyncio
-    async def test_get_baseline_not_found(self, seeded_async_client):
-        res = await seeded_async_client.get("/api/v1/policy-builder/nist-baseline/AGT-UNKNOWN")
+    async def test_get_baseline_not_found(self, auth_async_client):
+        res = await auth_async_client.get("/api/v1/policy-builder/nist-baseline/AGT-UNKNOWN")
         assert res.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_update_odp(self, seeded_async_client, db_session):
+    async def test_update_odp(self, auth_async_client, db_session):
         # The endpoint expects odps as a dict of key-value strings
         payload = {
             "odps": {
@@ -49,7 +49,7 @@ class TestPolicyBuilderAPI:
                 "record_threshold": "5",
             }
         }
-        res = await seeded_async_client.put(
+        res = await auth_async_client.put(
             "/api/v1/policy-builder/odps/AGT-EXT-005",
             json=payload,
         )
@@ -74,7 +74,7 @@ class TestPolicyBuilderAPI:
         assert odp.odp_value == "high"
 
     @pytest.mark.asyncio
-    async def test_update_odp_validation_error(self, seeded_async_client):
+    async def test_update_odp_validation_error(self, auth_async_client):
         # Invalid payload structure (not a dict of strings) should 422
         payload = {
             "odps": {
@@ -82,7 +82,7 @@ class TestPolicyBuilderAPI:
                 "auto_contain_enabled": True,  # bool instead of str
             }
         }
-        res = await seeded_async_client.put(
+        res = await auth_async_client.put(
             "/api/v1/policy-builder/odps/AGT-EXT-005",
             json=payload,
         )
@@ -90,7 +90,7 @@ class TestPolicyBuilderAPI:
         assert res.status_code in (200, 422)
 
     @pytest.mark.asyncio
-    async def test_bulk_update_odps(self, seeded_async_client, db_session):
+    async def test_bulk_update_odps(self, auth_async_client, db_session):
         # Bulk update expects {incident_type: {odp_key: odp_value}}
         payload = {
             "AGT-INJ-006": {
@@ -104,7 +104,7 @@ class TestPolicyBuilderAPI:
                 "record_threshold": "10",
             }
         }
-        res = await seeded_async_client.put(
+        res = await auth_async_client.put(
             "/api/v1/policy-builder/odps/bulk",
             json=payload,
         )
@@ -114,7 +114,7 @@ class TestPolicyBuilderAPI:
         assert data["data"]["applied"] == 8
 
     @pytest.mark.asyncio
-    async def test_get_resolved_policy(self, seeded_async_client, db_session):
+    async def test_get_resolved_policy(self, auth_async_client, db_session):
         # First create an ODP
         baseline_result = await db_session.execute(
             select(NistBaseline).where(NistBaseline.incident_type == "AGT-RAT-009")
@@ -128,7 +128,7 @@ class TestPolicyBuilderAPI:
         ))
         await db_session.commit()
 
-        res = await seeded_async_client.get("/api/v1/policy-builder/resolve/AGT-RAT-009")
+        res = await auth_async_client.get("/api/v1/policy-builder/resolve/AGT-RAT-009")
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is True
@@ -137,8 +137,8 @@ class TestPolicyBuilderAPI:
         assert data["data"]["effective_policy"]["severity_threshold"] == "high"
 
     @pytest.mark.asyncio
-    async def test_list_templates(self, seeded_async_client):
-        res = await seeded_async_client.get("/api/v1/policy-builder/templates")
+    async def test_list_templates(self, auth_async_client):
+        res = await auth_async_client.get("/api/v1/policy-builder/templates")
         assert res.status_code == 200
         data = res.json()
         assert len(data) >= 3
@@ -146,8 +146,8 @@ class TestPolicyBuilderAPI:
         assert "HIPAA Healthcare" in names
 
     @pytest.mark.asyncio
-    async def test_apply_template_dry_run(self, seeded_async_client):
-        res = await seeded_async_client.post(
+    async def test_apply_template_dry_run(self, auth_async_client):
+        res = await auth_async_client.post(
             "/api/v1/policy-builder/templates/TPL-HIPAA/apply",
             json={"dry_run": True, "incident_types": ["AGT-EXT-005"]},
         )
@@ -158,7 +158,7 @@ class TestPolicyBuilderAPI:
         assert len(results) >= 1
 
     @pytest.mark.asyncio
-    async def test_get_conflicts(self, seeded_async_client, db_session):
+    async def test_get_conflicts(self, auth_async_client, db_session):
         # Insert a conflict record directly
         baseline_result = await db_session.execute(
             select(NistBaseline).where(NistBaseline.incident_type == "AGT-DEL-001")
@@ -178,7 +178,7 @@ class TestPolicyBuilderAPI:
         ))
         await db_session.commit()
 
-        res = await seeded_async_client.get("/api/v1/policy-builder/conflicts")
+        res = await auth_async_client.get("/api/v1/policy-builder/conflicts")
         assert res.status_code == 200
         data = res.json()
         # The conflicts endpoint returns paginated items, not keyed by incident_type
@@ -186,7 +186,7 @@ class TestPolicyBuilderAPI:
         assert data["data"]["summary"]["total"] >= 1
 
     @pytest.mark.asyncio
-    async def test_get_versions(self, seeded_async_client, db_session):
+    async def test_get_versions(self, auth_async_client, db_session):
         # Get a baseline id first
         result = await db_session.execute(
             select(NistBaseline).where(NistBaseline.incident_type == "AGT-CRE-008")
@@ -202,7 +202,7 @@ class TestPolicyBuilderAPI:
         ))
         await db_session.commit()
 
-        res = await seeded_async_client.get(f"/api/v1/policy-builder/versions?baseline_id={baseline.id}")
+        res = await auth_async_client.get(f"/api/v1/policy-builder/versions?baseline_id={baseline.id}")
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is True
@@ -210,7 +210,7 @@ class TestPolicyBuilderAPI:
         assert data["data"]["items"][0]["version_number"] == 1
 
     @pytest.mark.asyncio
-    async def test_rollback_version(self, seeded_async_client, db_session):
+    async def test_rollback_version(self, auth_async_client, db_session):
         # Get baseline id
         result = await db_session.execute(
             select(NistBaseline).where(NistBaseline.incident_type == "AGT-HAL-007")
@@ -243,7 +243,7 @@ class TestPolicyBuilderAPI:
         )
         version = result.scalar_one()
 
-        res = await seeded_async_client.post(
+        res = await auth_async_client.post(
             f"/api/v1/policy-builder/versions/{version.id}/rollback"
         )
         assert res.status_code == 200
@@ -251,8 +251,8 @@ class TestPolicyBuilderAPI:
         assert data["success"] is True
 
     @pytest.mark.asyncio
-    async def test_validate_odps(self, seeded_async_client):
-        res = await seeded_async_client.post("/api/v1/policy-builder/validate")
+    async def test_validate_odps(self, auth_async_client):
+        res = await auth_async_client.post("/api/v1/policy-builder/validate")
         assert res.status_code == 200
         data = res.json()
         assert data["success"] is True

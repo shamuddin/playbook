@@ -402,7 +402,7 @@ class ForensicsService:
         package_data["signature"] = {
             "algorithm": "HMAC-SHA256",
             "signature": signature,
-            "key_hint": settings.secret_key[:8] + "..." if len(settings.secret_key) > 8 else "",
+            "public_key_fingerprint": hashlib.sha256(settings.secret_key.encode()).hexdigest()[:16],
         }
         evidence.package_data = package_data
         await db.flush()
