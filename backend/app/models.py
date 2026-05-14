@@ -124,6 +124,8 @@ class Agent(Base):
     bypass_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     judge_decision_count: Mapped[int] = mapped_column(Integer, default=0)
     suprawall_connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(20), default="offline")
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -225,7 +227,7 @@ class AgentHealthHistory(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False)
     health_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    lie_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    lie_rate: Mapped[float] = mapped_column(Float, default=0.0)
     risk_score: Mapped[int] = mapped_column(Integer, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 

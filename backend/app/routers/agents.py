@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Agent, AgentHealthHistory, Incident
+from app.models import utc_now
 from app.schemas import StandardResponse
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -316,4 +317,50 @@ async def create_agent(
             "name": agent.name,
         },
         message="Agent registered",
+    )
+
+
+@router.post("/{agent_id}/heartbeat", response_model=StandardResponse)
+async def agent_heartbeat(
+    agent_id: str,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Receive a heartbeat from a monitored agent.
+
+    Used by the Python SDK to report agent health.
+    """
+    result = await db.execute(select(Agent).where(Agent.system_id == agent_id))
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        # Auto-register unknown agents on first heartbeat
+        agent = Agent(
+            system_id=agent_id,
+            name=f"Agent-{agent_id[:8]}",
+            status="online",
+            health_score=int(data.get("health_score", 100)),
+            last_seen=utc_now(),
+        )
+        db.add(agent)
+        await db.flush()
+    else:
+        agent.status = "online"
+        agent.health_score = int(data.get("health_score", agent.health_score))
+        agent.last_seen = utc_now()
+
+    # Log heartbeat
+    heartbeat = AgentHealthHistory(
+        agent_id=agent.id,
+        health_score=int(data.get("health_score", agent.health_score)),
+        lie_rate=data.get("lie_rate", 0.0),
+        risk_score=data.get("risk_score"),
+        recorded_at=utc_now(),
+    )
+    db.add(heartbeat)
+    await db.commit()
+
+    return StandardResponse(
+        success=True,
+        data={"agent_id": agent_id, "status": "online", "health_score": agent.health_score},
     )
