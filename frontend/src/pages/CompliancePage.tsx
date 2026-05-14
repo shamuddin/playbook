@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { FileText, Shield, AlertTriangle, CheckCircle, BookOpen } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+import { getApiBase } from '../utils/config'
+
+const API_BASE = getApiBase()
 
 interface Framework {
   name: string

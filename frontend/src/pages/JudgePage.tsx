@@ -11,7 +11,9 @@ import {
   Lock,
 } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+import { getApiBase } from '../utils/config'
+
+const API_BASE = getApiBase()
 
 interface JudgeStats {
   total_decisions: number

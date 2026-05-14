@@ -12,7 +12,9 @@ import {
   RotateCcw,
 } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api/v1'
+import { getApiBase } from '../utils/config'
+
+const API_BASE = getApiBase()
 
 interface Template {
   id: string
