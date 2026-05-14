@@ -6,6 +6,7 @@
 **Backend:** FastAPI (Python 3.11+)
 **Protocol:** REST + WebSocket
 **Content-Type:** `application/json`
+**Endpoints:** 58 total (REST + WebSocket)
 **Last Updated:** 2025-08-01
 
 ---

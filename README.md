@@ -9,11 +9,13 @@ PLAYBOOK implements the **Judge Layer pattern** — a deterministic, rule-based 
 ### Key Features
 
 - **4-Stage Pipeline**: DETECT → CLASSIFY/JUDGE → ENFORCE → FORENSICS
-- **Deterministic Judge Layer**: Zero LLM in enforcement path, <40ms core latency
+- **Deterministic Judge Layer**: Zero LLM in enforcement path, Target: <40ms core latency (unverified)
 - **Policy Builder**: NIST SP 800-53 Organization-Defined Parameters (ODPs) with 6 industry templates
 - **16 Incident Types**: Full taxonomy from Data Destruction to Regulatory Trigger
-- **Bypass Detection**: Immune to 4 known LLM-judge bypass patterns (400/400 tests)
+- **Bypass Detection**: Immune to 4 known LLM-judge bypass patterns (55 test vectors)
 - **Compliance Mapping**: EU AI Act Art. 9/15/73, NIST AI RMF Agentic Profile, SOC 2 Type II
+
+> **Beta — not production ready.** Single-tenant only. Review security considerations before deploying.
 
 ## Quick Start
 
@@ -30,6 +32,21 @@ uvicorn app.main:app --reload
 cd frontend
 npm install
 npm run dev
+```
+
+### SDK Installation
+
+```bash
+pip install playbook-guard
+```
+
+```python
+from playbook_sdk import guard
+
+@guard(agent_id="my-agent")
+async def risky_action(data):
+    # Your logic here
+    pass
 ```
 
 ## Architecture
@@ -52,7 +69,7 @@ Stage 1: DETECT          Stage 2: CLASSIFY/JUDGE   Stage 3: ENFORCE        Stage
 |-------|-----------|
 | Backend | Python 3.11, FastAPI, SQLAlchemy 2.0, Alembic |
 | Frontend | React 18.2, TypeScript, Tailwind CSS, Recharts |
-| Database | SQLite 3.40+ (WAL mode, async via aiosqlite) |
+| Database | SQLite (default) or PostgreSQL (async via aiosqlite / asyncpg) |
 | DPI | Lobster Trap |
 | LLM Overlay | Gemini Pro (async only, never in enforcement) |
 

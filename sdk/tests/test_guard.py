@@ -121,6 +121,30 @@ class TestGuardDecorator:
             result = my_sync_action()
             assert result == "sync success"
 
+    @pytest.mark.asyncio
+    async def test_quarantine_with_callback_returns_value(self):
+        """QUARANTINE with on_quarantine callback returns custom value instead of raising."""
+        with patch("playbook_sdk.guard.PlaybookClient") as MockClient:
+            client = AsyncMock()
+            client.judge.return_value = {
+                "verdict": "QUARANTINE",
+                "reason": "Suspicious",
+            }
+            MockClient.return_value = client
+
+            async def handle_q(verdict, *args, **kwargs):
+                return {"quarantined": True, "reason": verdict["reason"]}
+
+            g = Guard(agent_id="test", endpoint="http://test", on_quarantine=handle_q)
+
+            @g
+            async def my_action():
+                return "should not reach"
+
+            result = await my_action()
+            assert result["quarantined"] is True
+            assert result["reason"] == "Suspicious"
+
     def test_guard_factory(self):
         g = guard(agent_id="factory-test")
         assert isinstance(g, Guard)
