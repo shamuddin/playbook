@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.security import create_access_token, get_current_user, get_password_hash, verify_password
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import User, UserRole, utc_now
 from app.schemas import StandardResponse
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -46,7 +46,7 @@ async def login(
             detail="Account disabled",
         )
 
-    user.last_login = datetime.now(timezone.utc)
+    user.last_login = utc_now()
     await db.commit()
 
     token = create_access_token(

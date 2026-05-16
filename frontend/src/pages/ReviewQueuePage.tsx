@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { UserCheck, Clock, AlertTriangle, CheckCircle } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -36,12 +37,14 @@ export default function ReviewQueuePage() {
       const params = new URLSearchParams()
       params.set('page_size', '100')
       params.set('status', 'escalated')
-      const res = await fetch(`${API_BASE}/incidents?${params.toString()}`)
+      const res = await apiFetch(`${API_BASE}/incidents?${params.toString()}`)
+      if (!res.ok) throw new Error('Unauthorized')
       const data = await res.json()
       let items = data.data || []
 
       // Also fetch all incidents and filter for ESCALATE verdict
-      const allRes = await fetch(`${API_BASE}/incidents?page_size=100`)
+      const allRes = await apiFetch(`${API_BASE}/incidents?page_size=100`)
+      if (!allRes.ok) throw new Error('Unauthorized')
       const allData = await allRes.json()
       const escalateItems = (allData.data || []).filter(
         (i: Incident) => i.judge_verdict === 'ESCALATE' && !items.find((x: Incident) => x.id === i.id)

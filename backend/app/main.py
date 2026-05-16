@@ -1,6 +1,8 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.database import AsyncSessionLocal, engine
-from app.models import Base
+from app.models import Base, PlaygroundSession, PlaygroundSessionStatus, utc_now
 from app.core.security import get_current_user
 from app.routers import (
     agents,
@@ -17,11 +19,14 @@ from app.routers import (
     dashboard,
     demo,
     forensics,
+    gemini,
     health,
     incidents,
     integrations,
     judge,
+    lobstertrap,
     playbooks,
+    playground,
     policy_builder,
     websocket,
 )
@@ -39,6 +44,29 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Reset orphaned playground sessions (backend restarted while running)
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import update
+        try:
+            result = await db.execute(
+                update(PlaygroundSession)
+                .where(PlaygroundSession.status == PlaygroundSessionStatus.RUNNING)
+                .values(status=PlaygroundSessionStatus.ERROR, stopped_at=utc_now())
+            )
+            await db.commit()
+            if result.rowcount:
+                print(f"[startup] Reset {result.rowcount} orphaned playground session(s) to ERROR")
+                # Also mark mirrored agents offline since their session died
+                await db.execute(
+                    update(Agent)
+                    .where(Agent.status == "online")
+                    .values(status="offline")
+                )
+                await db.commit()
+                print("[startup] Mirrored agents marked offline")
+        except Exception as exc:
+            print(f"[startup] Warning: failed to reset orphaned sessions: {exc}")
+
     # Seed reference data if configured
     if settings.is_demo_mode or settings.seed_on_startup:
         async with AsyncSessionLocal() as session:
@@ -53,6 +81,7 @@ async def lifespan(app: FastAPI):
     # Start log tailer in demo/development mode
     tailer = None
     heartbeat_task = None
+    lobstertrap_task = None
     if settings.is_demo_mode or settings.is_development:
         from app.services.detect import normalize_event
         from app.services.detect.engine import DetectionEngine
@@ -86,6 +115,56 @@ async def lifespan(app: FastAPI):
         await tailer.start()
         print(f"[tailer] Started monitoring: {tailer.log_dir}")
 
+        # --- Lobster Trap integration ---
+        if settings.lobstertrap_enabled:
+            binary_path = Path(settings.lobstertrap_binary_path)
+            if os.name == "nt" and not str(binary_path).endswith(".exe"):
+                binary_path = Path(str(binary_path) + ".exe")
+            if not binary_path.exists():
+                # Try repo root fallback
+                repo_root = Path(__file__).resolve().parents[2]
+                alt = repo_root / binary_path
+                if alt.exists():
+                    binary_path = alt
+            if binary_path.exists():
+                from app.services.lobstertrap_integration import (
+                    read_lobstertrap_logs,
+                    start_lobstertrap_proxy,
+                )
+
+                lt_status = await start_lobstertrap_proxy()
+                print(f"[lobstertrap] Proxy started: {lt_status}")
+
+                async def _on_lt_event(event):
+                    async with AsyncSessionLocal() as session:
+                        try:
+                            detection = engine_inst.evaluate(event)
+                            if detection.incident_type is None:
+                                return
+                            incident = await IncidentFactory.create_incident(
+                                session, event, detection
+                            )
+                            await session.commit()
+                            await ws_manager.broadcast({
+                                "event_type": "incident_detected",
+                                "source": "lobstertrap",
+                                "incident_id": incident.incident_id,
+                                "severity": incident.severity,
+                                "category": incident.category,
+                                "incident_type": incident.incident_type,
+                                "confidence": incident.confidence,
+                                "timestamp": incident.created_at.isoformat(),
+                            })
+                        except Exception as exc:
+                            print(f"[lobstertrap] Error processing event: {exc}")
+
+                lobstertrap_task = asyncio.create_task(
+                    read_lobstertrap_logs(on_event=_on_lt_event)
+                )
+                print("[lobstertrap] Started log reader")
+            else:
+                print(f"[lobstertrap] Binary not found at {binary_path}")
+
         # Start WebSocket heartbeat
         async def _heartbeat():
             while True:
@@ -113,6 +192,16 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if lobstertrap_task is not None:
+        lobstertrap_task.cancel()
+        try:
+            await lobstertrap_task
+        except asyncio.CancelledError:
+            pass
+        print("[lobstertrap] Stopped log reader")
+        from app.services.lobstertrap_integration import stop_lobstertrap_proxy
+        await stop_lobstertrap_proxy()
+        print("[lobstertrap] Stopped proxy")
     if heartbeat_task is not None:
         heartbeat_task.cancel()
         try:
@@ -140,7 +229,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     expose_headers=["X-Request-ID"],
     max_age=600,
@@ -162,7 +251,11 @@ app.include_router(compliance.router, prefix=settings.api_prefix, dependencies=_
 app.include_router(agents.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 app.include_router(dashboard.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 app.include_router(integrations.router, prefix=settings.api_prefix, dependencies=_auth_dep)
-app.include_router(websocket.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(lobstertrap.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(playground.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(gemini.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+# WebSocket router handles auth internally via query params — don't apply HTTP Bearer deps
+app.include_router(websocket.router, prefix=settings.api_prefix)
 
 
 @app.get("/")

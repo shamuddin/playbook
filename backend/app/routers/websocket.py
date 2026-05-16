@@ -16,6 +16,7 @@ async def incidents_websocket(websocket: WebSocket):
     Clients receive broadcasts for new incidents and can subscribe with filters.
     Authentication via query parameter: ?token=<jwt>
     """
+    await websocket.accept()
     async with AsyncSessionLocal() as db:
         current_user = await get_current_user_ws(websocket, db)
         if not current_user:

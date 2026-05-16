@@ -96,7 +96,7 @@ class TestDatabaseConfig:
     def test_settings_defaults(self):
         from app.core.config import Settings
 
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.database_url == "sqlite:///./data/playbooks.db"
         assert s.database_pool_size == 5
         assert s.database_max_overflow == 10

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -98,8 +99,8 @@ export default function PolicyBuilderPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API_BASE}/policy-builder/templates`).then((r) => r.json()),
-      fetch(`${API_BASE}/policy-builder/nist-baseline`).then((r) => r.json()),
+      apiFetch(`${API_BASE}/policy-builder/templates`).then((r) => (r.ok ? r.json() : [])),
+      apiFetch(`${API_BASE}/policy-builder/nist-baseline`).then((r) => (r.ok ? r.json() : { data: {} })),
       fetchConflicts().catch(() => {}),
     ])
       .then(([tplRes, baseRes]) => {
@@ -113,7 +114,7 @@ export default function PolicyBuilderPage() {
   const applyTemplate = async (templateId: string) => {
     setApplying(true)
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${API_BASE}/policy-builder/templates/${templateId}/apply`,
         {
           method: 'POST',
@@ -133,9 +134,8 @@ export default function PolicyBuilderPage() {
 
   const fetchBaselines = async () => {
     try {
-      const res = await fetch(`${API_BASE}/policy-builder/nist-baseline`, {
-        credentials: 'include',
-      })
+      const res = await apiFetch(`${API_BASE}/policy-builder/nist-baseline`)
+      if (!res.ok) return
       const data = await res.json()
       setBaselines(data.data?.items || [])
     } catch {}
@@ -143,9 +143,7 @@ export default function PolicyBuilderPage() {
 
   const fetchConflicts = async () => {
     try {
-      const res = await fetch(`${API_BASE}/policy-builder/conflicts`, {
-        credentials: 'include',
-      })
+      const res = await apiFetch(`${API_BASE}/policy-builder/conflicts`)
       if (!res.ok) return
       const data: Record<string, ConflictItem[]> = await res.json()
       setOdpConflicts(data)
@@ -169,11 +167,10 @@ export default function PolicyBuilderPage() {
         compliance_report: form.compliance_report === 'true',
         record_threshold: parseInt(form.record_threshold, 10) || 0,
       }
-      const res = await fetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
+      const res = await apiFetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        credentials: 'include',
       })
       if (res.ok) {
         await Promise.all([fetchBaselines(), fetchConflicts()])
@@ -195,7 +192,7 @@ export default function PolicyBuilderPage() {
 
     for (const tpl of templates) {
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `${API_BASE}/policy-builder/templates/${tpl.template_id}/apply`,
           {
             method: 'POST',
@@ -253,7 +250,7 @@ export default function PolicyBuilderPage() {
             <select
               value={compareType}
               onChange={(e) => setCompareType(e.target.value)}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full min-w-[200px] px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {baselines.map((b) => (
                 <option key={b.incident_type} value={b.incident_type}>

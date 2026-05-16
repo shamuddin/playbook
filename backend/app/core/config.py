@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # CORS
     frontend_url: str = "http://localhost:5173"
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176"
 
     @property
     def cors_origins_list(self) -> List[str]:
@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     gcp_location: str = "global"
 
     # Lobster Trap
+    lobstertrap_enabled: bool = True
     lobstertrap_binary_path: str = "./bin/lobstertrap"
     lobstertrap_log_dir: str = "./logs/lobstertrap"
     lobstertrap_policy_dir: str = "./policies"

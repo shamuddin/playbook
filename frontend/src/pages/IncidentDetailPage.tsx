@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -71,16 +72,13 @@ export default function IncidentDetailPage() {
     setLoading(true)
     try {
       const [incRes, tlRes, forenRes] = await Promise.all([
-        fetch(`${API_BASE}/incidents/${id}`),
-        fetch(`${API_BASE}/incidents/${id}/timeline`),
-        fetch(`${API_BASE}/incidents/${id}/forensics`),
+        apiFetch(`${API_BASE}/incidents/${id}`),
+        apiFetch(`${API_BASE}/incidents/${id}/timeline`),
+        apiFetch(`${API_BASE}/incidents/${id}/forensics`),
       ])
-      const incData = await incRes.json()
-      const tlData = await tlRes.json()
-      const forenData = await forenRes.json()
-      setIncident(incData)
-      setTimeline(tlData || [])
-      setForensics(forenData.data || null)
+      if (incRes.ok) setIncident(await incRes.json())
+      if (tlRes.ok) setTimeline((await tlRes.json()) || [])
+      if (forenRes.ok) setForensics((await forenRes.json()).data || null)
     } catch {
       // ignore
     }

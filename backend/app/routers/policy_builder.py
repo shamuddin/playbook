@@ -1044,7 +1044,7 @@ async def resolve_conflict(
 
     conflict.status = "resolved"
     conflict.resolved_by = "system"
-    conflict.resolved_at = datetime.now(timezone.utc)
+    conflict.resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.commit()
 
     return StandardResponse(

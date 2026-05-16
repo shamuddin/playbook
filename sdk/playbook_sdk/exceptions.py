@@ -13,12 +13,16 @@ class GuardError(PlaybookError):
 
 class GuardBlockedError(GuardError):
     """Raised when the Judge Layer blocks an action."""
-    pass
+    def __init__(self, message: str, verdict: dict | None = None):
+        super().__init__(message)
+        self.verdict = verdict
 
 
 class GuardQuarantinedError(GuardError):
     """Raised when the Judge Layer quarantines an action."""
-    pass
+    def __init__(self, message: str, verdict: dict | None = None):
+        super().__init__(message)
+        self.verdict = verdict
 
 
 class GuardTimeoutError(GuardError):

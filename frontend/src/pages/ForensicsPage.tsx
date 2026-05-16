@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -52,13 +53,11 @@ export default function ForensicsPage() {
     setLoading(true)
     try {
       const [pkgRes, verifyRes] = await Promise.all([
-        fetch(`${API_BASE}/forensics/${id}`),
-        fetch(`${API_BASE}/forensics/${id}?format=verify`),
+        apiFetch(`${API_BASE}/forensics/${id}`),
+        apiFetch(`${API_BASE}/forensics/${id}?format=verify`),
       ])
-      const pkgData = await pkgRes.json()
-      const verifyData = await verifyRes.json()
-      setPkg(pkgData.data || null)
-      setVerify(verifyData.data || null)
+      if (pkgRes.ok) setPkg((await pkgRes.json()).data || null)
+      if (verifyRes.ok) setVerify((await verifyRes.json()).data || null)
     } catch {
       // ignore
     }

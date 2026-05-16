@@ -17,6 +17,7 @@ import {
 import { BarChart3, Clock, Activity, Shield } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -62,13 +63,11 @@ export default function AnalyticsPage() {
     setLoading(true)
     try {
       const [sumRes, trendRes] = await Promise.all([
-        fetch(`${API_BASE}/dashboard/analytics/summary?period=${period}`),
-        fetch(`${API_BASE}/dashboard/analytics/trends?period=${period}&granularity=daily`),
+        apiFetch(`${API_BASE}/dashboard/analytics/summary?period=${period}`),
+        apiFetch(`${API_BASE}/dashboard/analytics/trends?period=${period}&granularity=daily`),
       ])
-      const sumData = await sumRes.json()
-      const trendData = await trendRes.json()
-      setSummary(sumData.data || null)
-      setTrends(trendData.data || null)
+      if (sumRes.ok) setSummary((await sumRes.json()).data || null)
+      if (trendRes.ok) setTrends((await trendRes.json()).data || null)
     } catch {
       // ignore
     }

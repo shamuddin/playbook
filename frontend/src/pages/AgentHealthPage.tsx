@@ -7,6 +7,8 @@ import {
   Search,
 } from 'lucide-react'
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
+import { useWebSocket } from '../hooks/useWebSocket'
 
 const API_BASE = getApiBase()
 
@@ -33,16 +35,39 @@ export default function AgentHealthPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const { messages } = useWebSocket()
 
-  useEffect(() => {
-    fetch(`${API_BASE}/agents`)
-      .then((r) => r.json())
+  const fetchAgents = () => {
+    apiFetch(`${API_BASE}/agents`)
+      .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
-        setAgents(res.data?.items || [])
+        if (res?.data?.items) setAgents(res.data.items)
         setLoading(false)
       })
       .catch(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    fetchAgents()
   }, [])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAgents()
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (messages.length === 0) return
+    const latest = messages[0]
+    if (
+      latest.event_type === 'agent_status_updated' ||
+      (latest.agent_id !== undefined && latest.agent_id !== null)
+    ) {
+      fetchAgents()
+    }
+  }, [messages])
 
   const filtered = agents.filter(
     (a) =>
@@ -197,7 +222,7 @@ export default function AgentHealthPage() {
                 <td className="px-4 py-3">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      agent.status === 'healthy'
+                      agent.status === 'healthy' || agent.status === 'online'
                         ? 'bg-green-100 text-green-700'
                         : agent.status === 'degraded'
                         ? 'bg-yellow-100 text-yellow-700'

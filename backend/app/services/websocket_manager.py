@@ -15,7 +15,6 @@ class ConnectionManager:
         self._user_ids: Dict[WebSocket, Optional[str]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: Optional[str] = None) -> None:
-        await websocket.accept()
         self._connections.add(websocket)
         self._filters[websocket] = {}
         self._user_ids[websocket] = user_id
@@ -36,10 +35,14 @@ class ConnectionManager:
                 # Simple filter check: if filters specify severity, match it
                 filters = self._filters.get(ws, {})
                 msg_severity = message.get("severity")
-                if filters.get("severity") and msg_severity:
+                if filters.get("severity") and msg_severity is not None:
                     if msg_severity not in filters["severity"]:
                         continue
-                await ws.send_json(message)
+                try:
+                    await ws.send_json(message)
+                except Exception as exc:
+                    print(f"[ws] Send error: {exc}")
+                    disconnected.append(ws)
             except Exception:
                 disconnected.append(ws)
 

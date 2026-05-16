@@ -52,17 +52,19 @@ class PlaybookClient:
         action_type: str,
         action_details: dict[str, Any],
         agent_context: Optional[dict] = None,
+        metadata: Optional[dict] = None,
     ) -> dict:
         """Submit an action to the Judge Layer for evaluation."""
+        action_summary = action_details.get("action_summary", str(action_details))
         payload = {
+            "action": action_summary,
             "agent_id": agent_id,
-            "action_type": action_type,
-            "action_details": action_details,
-            "agent_context": agent_context or {},
+            "session_id": agent_context.get("session_id") if agent_context else None,
+            "metadata": metadata or {},
         }
         resp = await self.client.post("/api/v1/judge/evaluate", json=payload)
         resp.raise_for_status()
-        return resp.json()["data"]
+        return resp.json()
 
     async def report_incident(
         self,

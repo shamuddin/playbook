@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -32,6 +32,13 @@ async def list_agents(
 ) -> StandardResponse:
     """List all monitored agents with filtering and pagination."""
     query = select(Agent)
+
+    # Exclude known demo agents
+    demo_system_ids = ["athena", "argus", "clerkbot", "Athena", "Argus", "ClerkBot"]
+    query = query.where(
+        Agent.system_id.not_in(demo_system_ids),
+        not_(Agent.system_id.like("demo-%")),
+    )
 
     if type:
         # Agent model doesn't have a type column; filter by name pattern for now
@@ -62,6 +69,10 @@ async def list_agents(
     agents = result.scalars().all()
 
     def _agent_status(agent: Agent) -> str:
+        if agent.status == "offline":
+            return "offline"
+        if agent.status == "online" and agent.health_score >= 80:
+            return "online"
         if agent.health_score >= 80:
             return "healthy"
         elif agent.health_score >= 50:

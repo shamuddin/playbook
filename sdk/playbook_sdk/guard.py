@@ -22,12 +22,14 @@ class Guard:
         on_quarantine: Optional[Callable] = None,
         endpoint: Optional[str] = None,
         api_key: Optional[str] = None,
+        metadata: Optional[dict] = None,
     ):
         self.agent_id = agent_id or "default"
         self.action_type = action_type or "tool_call"
         self.on_block = on_block
         self.on_quarantine = on_quarantine
         self.client = PlaybookClient(endpoint=endpoint, api_key=api_key)
+        self.metadata = metadata or {}
 
     async def evaluate(self, func_name: str, args: tuple, kwargs: dict) -> dict:
         """Send action to Judge Layer for evaluation."""
@@ -41,6 +43,7 @@ class Guard:
             agent_id=self.agent_id,
             action_type=self.action_type,
             action_details=action_details,
+            metadata=self.metadata,
         )
         return result
 
@@ -53,18 +56,20 @@ class Guard:
             if decision == "ALLOW":
                 return await func(*args, **kwargs)
 
-            elif decision == "BLOCK":
+            elif decision in ("BLOCK", "DENY"):
                 if self.on_block:
                     return await self.on_block(verdict, *args, **kwargs)
                 raise GuardBlockedError(
-                    f"Action '{func.__name__}' blocked by PLAYBOOK: {verdict.get('reason', 'No reason')}"
+                    f"Action '{func.__name__}' blocked by PLAYBOOK: {verdict.get('rationale', 'No reason')}",
+                    verdict=verdict,
                 )
 
             elif decision == "QUARANTINE":
                 if self.on_quarantine:
                     return await self.on_quarantine(verdict, *args, **kwargs)
                 raise GuardQuarantinedError(
-                    f"Action '{func.__name__}' quarantined by PLAYBOOK: {verdict.get('reason', 'No reason')}"
+                    f"Action '{func.__name__}' quarantined by PLAYBOOK: {verdict.get('rationale', 'No reason')}",
+                    verdict=verdict,
                 )
 
             else:
@@ -87,18 +92,20 @@ class Guard:
             if decision == "ALLOW":
                 return func(*args, **kwargs)
 
-            elif decision == "BLOCK":
+            elif decision in ("BLOCK", "DENY"):
                 if self.on_block:
                     return self.on_block(verdict, *args, **kwargs)
                 raise GuardBlockedError(
-                    f"Action '{func.__name__}' blocked by PLAYBOOK: {verdict.get('reason', 'No reason')}"
+                    f"Action '{func.__name__}' blocked by PLAYBOOK: {verdict.get('rationale', 'No reason')}",
+                    verdict=verdict,
                 )
 
             elif decision == "QUARANTINE":
                 if self.on_quarantine:
                     return self.on_quarantine(verdict, *args, **kwargs)
                 raise GuardQuarantinedError(
-                    f"Action '{func.__name__}' quarantined by PLAYBOOK: {verdict.get('reason', 'No reason')}"
+                    f"Action '{func.__name__}' quarantined by PLAYBOOK: {verdict.get('rationale', 'No reason')}",
+                    verdict=verdict,
                 )
 
             else:
@@ -123,6 +130,7 @@ def guard(
     on_quarantine: Optional[Callable] = None,
     endpoint: Optional[str] = None,
     api_key: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ) -> Guard:
     """Factory to create a Guard decorator."""
     return Guard(
@@ -132,4 +140,5 @@ def guard(
         on_quarantine=on_quarantine,
         endpoint=endpoint,
         api_key=api_key,
+        metadata=metadata,
     )

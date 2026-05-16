@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.database import get_db
 from app.models import (
     Agent,
@@ -17,6 +18,9 @@ from app.models import (
     Incident,
     JudgeDecision,
     Playbook,
+    PlaygroundAgent,
+    PlaygroundSession,
+    PlaygroundSessionStatus,
     ResponseRecord,
     TimelineEvent,
 )
@@ -24,6 +28,8 @@ from app.schemas import StandardResponse
 from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+_IS_POSTGRES = get_settings().database_url.startswith("postgresql")
 
 
 def _parse_period(period: str) -> datetime:
@@ -36,7 +42,10 @@ def _parse_period(period: str) -> datetime:
         "7d": timedelta(days=7),
         "30d": timedelta(days=30),
     }
-    return now - mapping.get(period, timedelta(hours=24))
+    cutoff = now - mapping.get(period, timedelta(hours=24))
+    # PostgreSQL columns are TIMESTAMP WITHOUT TIME ZONE (naive);
+    # strip tzinfo to avoid "can't subtract offset-naive and offset-aware" errors.
+    return cutoff.replace(tzinfo=None)
 
 
 @router.get("", response_model=StandardResponse)
@@ -105,6 +114,23 @@ async def get_dashboard(
         select(func.count(Agent.id)).where(Agent.incident_count > 0)
     )
 
+    # Playground agents (linked to running sessions)
+    pg_agents_running = await db.scalar(
+        select(func.count(PlaygroundAgent.id))
+        .join(PlaygroundSession, PlaygroundAgent.session_id == PlaygroundSession.id)
+        .where(PlaygroundSession.status == PlaygroundSessionStatus.RUNNING)
+    )
+
+    pg_sessions_running = await db.scalar(
+        select(func.count(PlaygroundSession.id))
+        .where(PlaygroundSession.status == PlaygroundSessionStatus.RUNNING)
+    )
+
+    # Playground agents are already mirrored into the Agent table, so regular counts include them.
+    # Keep playground-specific counts separate for informational display.
+    total_pg = int(pg_agents_running or 0)
+    avg_health_combined = float(avg_health or 100.0)
+
     # Playbook stats
     total_playbooks = await db.scalar(select(func.count(Playbook.id)))
     active_playbooks = await db.scalar(
@@ -142,10 +168,12 @@ async def get_dashboard(
     avg_latency = await db.scalar(select(func.avg(JudgeDecision.latency_ms)))
 
     # Compute avg resolution time from response records
+    if _IS_POSTGRES:
+        resolution_expr = func.extract('epoch', ResponseRecord.completed_at - ResponseRecord.started_at) / 60.0
+    else:
+        resolution_expr = (func.julianday(ResponseRecord.completed_at) - func.julianday(ResponseRecord.started_at)) * 24 * 60
     avg_resolution = await db.scalar(
-        select(func.avg(
-            func.julianday(ResponseRecord.completed_at) - func.julianday(ResponseRecord.started_at)
-        ) * 24 * 60).where(ResponseRecord.completed_at != None)
+        select(func.avg(resolution_expr)).where(ResponseRecord.completed_at != None)
     )
 
     # Playbook success rate
@@ -238,8 +266,9 @@ async def get_dashboard(
                 "online": online_agents or 0,
                 "degraded": degraded_agents or 0,
                 "offline": offline_agents or 0,
-                "avg_health_score": round(avg_health, 1) if avg_health else 100.0,
+                "avg_health_score": round(avg_health_combined, 1),
                 "agents_with_incidents": agents_with_incidents or 0,
+                "playground_sessions_running": pg_sessions_running or 0,
             },
             "playbooks": {
                 "total": total_playbooks or 0,
@@ -323,7 +352,7 @@ async def get_system_metrics(
 ) -> StandardResponse:
     """Get real-time system performance metrics."""
     now = datetime.now(timezone.utc)
-    cutoff_1h = now - timedelta(hours=1)
+    cutoff_1h = (now - timedelta(hours=1)).replace(tzinfo=None)
 
     incidents_1h = await db.scalar(
         select(func.count(Incident.id)).where(Incident.created_at >= cutoff_1h)
@@ -384,10 +413,12 @@ async def get_analytics_summary(
     type_breakdown = {row[0]: row[1] for row in type_result.all()}
 
     # Response time stats
+    if _IS_POSTGRES:
+        response_expr = func.extract('epoch', ResponseRecord.completed_at - ResponseRecord.started_at) / 60.0
+    else:
+        response_expr = (func.julianday(ResponseRecord.completed_at) - func.julianday(ResponseRecord.started_at)) * 24 * 60
     avg_response = await db.scalar(
-        select(func.avg(
-            func.julianday(ResponseRecord.completed_at) - func.julianday(ResponseRecord.started_at)
-        ) * 24 * 60).where(
+        select(func.avg(response_expr)).where(
             (ResponseRecord.completed_at != None) & (ResponseRecord.started_at >= cutoff)
         )
     )
@@ -429,18 +460,31 @@ async def get_analytics_trends(
     """Incident and decision trend data for charts."""
     cutoff = _parse_period(period)
 
-    # SQLite strftime for grouping
-    fmt = "%Y-%m-%d %H:00" if granularity == "hourly" else "%Y-%m-%d"
+    # Dialect-aware time-bucket for grouping
+    if _IS_POSTGRES:
+        trunc_unit = "hour" if granularity == "hourly" else "day"
+
+        def _bucket(column):
+            return func.date_trunc(trunc_unit, column)
+    else:
+        bucket_fmt = "%Y-%m-%d %H:00" if granularity == "hourly" else "%Y-%m-%d"
+
+        def _bucket(column):
+            return func.strftime(bucket_fmt, column)
+
+    # Reusable bucket expressions so PostgreSQL sees identical GROUP BY / SELECT
+    inc_bucket = _bucket(Incident.created_at)
+    dec_bucket = _bucket(JudgeDecision.created_at)
 
     # Incident trends
     inc_result = await db.execute(
         select(
-            func.strftime(fmt, Incident.created_at),
+            inc_bucket,
             func.count(Incident.id),
         )
         .where(Incident.created_at >= cutoff)
-        .group_by(func.strftime(fmt, Incident.created_at))
-        .order_by(func.strftime(fmt, Incident.created_at))
+        .group_by(inc_bucket)
+        .order_by(inc_bucket)
     )
     incident_trends = [
         {"date": row[0], "count": row[1]} for row in inc_result.all()
@@ -449,12 +493,12 @@ async def get_analytics_trends(
     # Decision trends
     dec_result = await db.execute(
         select(
-            func.strftime(fmt, JudgeDecision.created_at),
+            dec_bucket,
             func.count(JudgeDecision.id),
         )
         .where(JudgeDecision.created_at >= cutoff)
-        .group_by(func.strftime(fmt, JudgeDecision.created_at))
-        .order_by(func.strftime(fmt, JudgeDecision.created_at))
+        .group_by(dec_bucket)
+        .order_by(dec_bucket)
     )
     decision_trends = [
         {"date": row[0], "count": row[1]} for row in dec_result.all()
@@ -463,13 +507,13 @@ async def get_analytics_trends(
     # Severity trends
     sev_result = await db.execute(
         select(
-            func.strftime(fmt, Incident.created_at),
+            inc_bucket,
             Incident.severity,
             func.count(Incident.id),
         )
         .where(Incident.created_at >= cutoff)
-        .group_by(func.strftime(fmt, Incident.created_at), Incident.severity)
-        .order_by(func.strftime(fmt, Incident.created_at))
+        .group_by(inc_bucket, Incident.severity)
+        .order_by(inc_bucket)
     )
     severity_trends: dict = {}
     for row in sev_result.all():

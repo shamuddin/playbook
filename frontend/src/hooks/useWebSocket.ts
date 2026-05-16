@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { getWsUrl, getSoundAlerts } from '../utils/config'
+import { getToken } from '../utils/api'
 
 interface WebSocketMessage {
   event_type: string
@@ -21,7 +22,13 @@ export function useWebSocket() {
   const connect = useCallback(() => {
     if (!isMountedRef.current) return
 
-    const WS_URL = getWsUrl()
+    const token = getToken()
+    let WS_URL = getWsUrl()
+    if (token) {
+      const sep = WS_URL.includes('?') ? '&' : '?'
+      WS_URL += `${sep}token=${encodeURIComponent(token)}`
+    }
+
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
 
@@ -37,7 +44,6 @@ export function useWebSocket() {
       setConnected(false)
       wsRef.current = null
 
-      // Exponential backoff reconnection
       if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
         const delay = Math.min(
           INITIAL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttemptsRef.current),
@@ -56,7 +62,6 @@ export function useWebSocket() {
         const data = JSON.parse(event.data) as WebSocketMessage
         setMessages((prev) => [data, ...prev].slice(0, 50))
 
-        // Sound alert for CRITICAL incidents
         if (
           data.event_type === 'incident_detected' &&
           data.severity === 'critical' &&

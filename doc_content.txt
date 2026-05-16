@@ -1,0 +1,643 @@
+PLAYBOOK: Detailed Implementation Plan
+From Current State to Production-Ready MVP
+Version: 1.0 Date: May 14, 2026 Current State: ~68% complete, 22 commits, 69 Python files, 0 SDK Target State: Production-ready MVP with SDK-first architecture Total Effort: ~92 engineering hours Estimated Calendar Time: 10-14 days (1 developer focused)
+Table of Contents
+Phase A: Security Hardening (P0) — 10 hours
+Phase B: Python SDK (P0) — 12 hours
+Phase C: Framework Middleware (P1) — 10 hours
+Phase D: Notification Connectors (P1) — 8 hours
+Phase E: Frontend Completion (P1) — 20 hours
+Phase F: Backend Completion (P1) — 10 hours
+Phase G: Testing & Documentation (P2) — 12 hours
+Phase H: Polish & Performance (P2) — 10 hours
+Implementation Order & Dependencies
+Success Criteria
+Phase A: Security Hardening (P0) — 10 hours
+PREREQUISITE: Must be completed before ANY deployment. Blocks all other phases.
+A.1: JWT Authentication System (4 hours)
+File: backend/app/core/security.py — COMPLETE REWRITE NEEDED
+Current state: JWT functions exist (create_access_token, decode_access_token) but are orphaned — no router imports them.
+Step 1: Add password hashing and user lookup
+# backend/app/core/security.py# ADD to existing imports:from passlib.context import CryptContextfrom jose import JWTError, jwtfrom fastapi import Depends, HTTPException, status, WebSocketExceptionfrom fastapi.security import HTTPBearer, HTTPAuthorizationCredentials# ADD:pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")security_bearer = HTTPBearer(auto_error=False)def verify_password(plain_password: str, hashed_password: str) -> bool:    return pwd_context.verify(plain_password, hashed_password)def get_password_hash(password: str) -> str:    return pwd_context.hash(password)def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:    to_encode = data.copy()    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=30))    to_encode.update({"exp": expire})    return jwt.encode(to_encode, settings.secret_key, algorithm="HS256")def decode_access_token(token: str) -> dict | None:    try:        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])        return payload    except JWTError:        return Noneasync def get_current_user(    credentials: HTTPAuthorizationCredentials = Depends(security_bearer),    db: AsyncSession = Depends(get_db),) -> "User":    if not credentials:        raise HTTPException(status_code=401, detail="Not authenticated")        payload = decode_access_token(credentials.credentials)    if not payload or not payload.get("sub"):        raise HTTPException(status_code=401, detail="Invalid token")        from app.models import User  # lazy import to avoid circular    result = await db.execute(select(User).where(User.id == payload["sub"]))    user = result.scalar_one_or_none()    if not user or not user.is_active:        raise HTTPException(status_code=401, detail="User not found or inactive")    return userasync def get_current_user_ws(websocket: WebSocket, db: AsyncSession) -> "User" | None:    """WebSocket auth via query parameter: ?token=<jwt>"""    token = websocket.query_params.get("token")    if not token:        return None        payload = decode_access_token(token)    if not payload or not payload.get("sub"):        return None        from app.models import User    result = await db.execute(select(User).where(User.id == payload["sub"]))    return result.scalar_one_or_none()
+File: backend/app/models.py — ADD User model
+# backend/app/models.py# ADD after existing imports:import enumclass UserRole(str, enum.Enum):    ADMIN = "admin"    ANALYST = "analyst"    VIEWER = "viewer"class User(Base):    __tablename__ = "users"        id: Mapped[str] = mapped_column(String(26), primary_key=True, default=generate_ulid)    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.VIEWER)    is_active: Mapped[bool] = mapped_column(default=True)    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+File: backend/app/routers/auth.py — NEW FILE
+# backend/app/routers/auth.pyfrom datetime import datetime, timezone, timedeltafrom fastapi import APIRouter, Depends, HTTPException, statusfrom fastapi.security import HTTPBearer, HTTPAuthorizationCredentialsfrom sqlalchemy.ext.asyncio import AsyncSessionfrom sqlalchemy import selectfrom app.database import get_dbfrom app.models import Userfrom app.schemas import StandardResponsefrom app.core.security import (    verify_password, get_password_hash,     create_access_token, decode_access_token)router = APIRouter(prefix="/auth", tags=["authentication"])@router.post("/login")async def login(    credentials: dict,    db: AsyncSession = Depends(get_db),):    """Authenticate user and return JWT token."""    email = credentials.get("email", "").lower().strip()    password = credentials.get("password", "")        if not email or not password:        raise HTTPException(status_code=400, detail="Email and password required")        result = await db.execute(select(User).where(User.email == email))    user = result.scalar_one_or_none()        if not user or not verify_password(password, user.hashed_password):        raise HTTPException(status_code=401, detail="Invalid credentials")        if not user.is_active:        raise HTTPException(status_code=403, detail="Account disabled")        user.last_login = datetime.now(timezone.utc)    await db.commit()        token = create_access_token(        data={"sub": user.id, "email": user.email, "role": user.role.value},        expires_delta=timedelta(hours=settings.jwt_expiration_hours or 24),    )        return StandardResponse(        success=True,        data={            "access_token": token,            "token_type": "bearer",            "expires_in": (settings.jwt_expiration_hours or 24) * 3600,            "user": {                "id": user.id,                "email": user.email,                "full_name": user.full_name,                "role": user.role.value,            },        }    )@router.post("/register")async def register(    data: dict,    db: AsyncSession = Depends(get_db),):    """Register new user. Admin-only if users exist, open if first user."""    result = await db.execute(select(User))    existing_count = len(result.scalars().all())        email = data.get("email", "").lower().strip()    password = data.get("password", "")    full_name = data.get("full_name", "")        if not email or not password or len(password) < 8:        raise HTTPException(status_code=400, detail="Email required, password min 8 chars")        existing = await db.execute(select(User).where(User.email == email))    if existing.scalar_one_or_none():        raise HTTPException(status_code=409, detail="Email already registered")        user = User(        email=email,        hashed_password=get_password_hash(password),        full_name=full_name,        role=UserRole.ADMIN if existing_count == 0 else UserRole.VIEWER,    )    db.add(user)    await db.commit()        return StandardResponse(        success=True,        data={"id": user.id, "email": user.email, "role": user.role.value},        message="User registered successfully",    )@router.get("/me")async def get_me(current_user: User = Depends(get_current_user)):    """Get current authenticated user."""    return StandardResponse(        success=True,        data={            "id": current_user.id,            "email": current_user.email,            "full_name": current_user.full_name,            "role": current_user.role.value,        }    )
+File: backend/app/main.py — MODIFY router registration
+# backend/app/main.py# ADD import:from app.routers import auth  # NEW# In router registration, ADD:app.include_router(auth.router)  # Auth must be first (no auth required)app.include_router(health.router)# ... existing routers get auth added below
+File: ALL 12 existing routers — ADD auth dependency
+For EACH router file (agents.py, incidents.py, judge.py, playbooks.py, etc.), modify:
+# At the top of each router file, ADD:from app.core.security import get_current_userfrom app.models import User# On EVERY endpoint, ADD the dependency:@router.get("", response_model=StandardResponse)async def list_items(    db: AsyncSession = Depends(get_db),    current_user: User = Depends(get_current_user),  # ADD THIS):    ...
+NOTE: Demo endpoints and health check should remain public (no auth).
+A.2: Fix timedelta NameError (15 minutes)
+File: backend/app/services/response_engine.py — ONE LINE FIX
+# Line ~11 (imports section)# CHANGE FROM:from datetime import datetime, timezone# TO:from datetime import datetime, timezone, timedelta
+This is a guaranteed NameError on every HUMAN_REVIEW action. Single-line fix.
+A.3: Secret Key Validation at Startup (30 minutes)
+File: backend/app/core/config.py — ADD validation
+# backend/app/core/config.py# In the Settings class, ADD:@field_validator("secret_key")@classmethoddef validate_secret_key(cls, v: str) -> str:    FORBIDDEN_SECRETS = [        "change-me-in-production",        "changeme",        "secret",        "admin",        "password",        "123456",    ]    lowered = v.lower().strip()    if lowered in FORBIDDEN_SECRETS or len(v) < 32:        raise ValueError(            f"SECRET_KEY must be at least 32 characters and not a common default. "            f"Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""        )    return v# Also update the default to force environment override:# CHANGE FROM:secret_key: str = "change-me-in-production"# TO:secret_key: str = Field(default="", validate_default=True)
+A.4: WebSocket Authentication (1.5 hours)
+File: backend/app/routers/websocket.py — MODIFY connection handler
+# backend/app/routers/websocket.py# MODIFY the connect handler:@router.websocket("/ws/incidents")async def websocket_incidents(websocket: WebSocket, db: AsyncSession = Depends(get_db)):    # ADD authentication check:    current_user = await get_current_user_ws(websocket, db)    if not current_user:        await websocket.close(code=4001, reason="Authentication required")        return        await ws_manager.connect(websocket)    try:        while True:            data = await websocket.receive_json()            # ... rest of existing code    except WebSocketDisconnect:        ws_manager.disconnect(websocket)
+File: backend/app/services/websocket_manager.py — MODIFY to track authenticated connections
+# Track user_id per connection for targeted broadcastsasync def connect(self, websocket: WebSocket, user_id: str | None = None):    await websocket.accept()    self.active_connections.append(websocket)    # Store user_id mapping for role-based filtering    if user_id:        websocket.user_id = user_id
+A.5: CORS Restriction (30 minutes)
+File: backend/app/main.py — RESTRICT CORS
+# CHANGE FROM:app.add_middleware(    CORSMiddleware,    allow_origins=settings.cors_origins or ["*"],    allow_credentials=True,    allow_methods=["*"],    allow_headers=["*"],)# TO:allowed_origins = settings.cors_origins or ["http://localhost:5173"]  # Vite dev serverapp.add_middleware(    CORSMiddleware,    allow_origins=allowed_origins,    allow_credentials=True,    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],    expose_headers=["X-Request-ID"],    max_age=600,)
+A.6: Fix HMAC Key Leak in Forensics (30 minutes)
+File: backend/app/services/forensics.py — REMOVE key hint
+# FIND (around line 266):"key_hint": settings.secret_key[:8] + "...",# REPLACE WITH:"verification_method": "HMAC-SHA256","public_key_fingerprint": hashlib.sha256(settings.secret_key.encode()).hexdigest()[:16],# The fingerprint is a one-way hash — proves the right key was used without revealing it
+Phase A Summary
+Task
+Effort
+Files Modified
+A.1 JWT Authentication
+4h
+security.py, models.py, auth.py (new), all 12 routers, main.py
+A.2 Fix timedelta NameError
+15min
+response_engine.py (1 line)
+A.3 Secret key validation
+30min
+config.py
+A.4 WebSocket auth
+1.5h
+websocket.py, websocket_manager.py
+A.5 CORS restriction
+30min
+main.py
+A.6 Fix HMAC key leak
+30min
+forensics.py
+TOTAL
+~7h
+Phase B: Python SDK (P0) — 12 hours
+THE #1 PRIORITY. This transforms PLAYBOOK from a dashboard into a safety infrastructure product. Without this, developers cannot adopt.
+B.1: SDK Package Structure — NEW DIRECTORY
+sdk/├── playbook_sdk/│   ├── __init__.py│   ├── client.py          # HTTP client for API calls│   ├── guard.py           # @guard decorator│   ├── heartbeat.py       # Background heartbeat sender│   ├── config.py          # SDK configuration│   ├── exceptions.py      # Custom exceptions│   ├── models.py          # Pydantic models for API types│   └── middleware/        # Framework integrations│       ├── __init__.py│       ├── langchain.py   # LangChain callback handler│       └── crewai.py      # CrewAI task wrapper├── tests/│   ├── test_guard.py│   ├── test_client.py│   └── test_middleware.py├── pyproject.toml├── README.md└── setup.py
+B.2: SDK Client — sdk/playbook_sdk/client.py
+# sdk/playbook_sdk/client.pyimport osimport timeimport loggingfrom typing import Optional, Anyfrom urllib.parse import urljoinimport httpxlogger = logging.getLogger("playbook")class PlaybookClient:    """HTTP client for the PLAYBOOK API."""        def __init__(        self,        endpoint: Optional[str] = None,        api_key: Optional[str] = None,        timeout: float = 5.0,    ):        self.endpoint = (endpoint or os.environ.get("PLAYBOOK_ENDPOINT", "http://localhost:8000")).rstrip("/")        self.api_key = api_key or os.environ.get("PLAYBOOK_API_KEY", "")        self.timeout = timeout        self._client: Optional[httpx.AsyncClient] = None        def _get_headers(self) -> dict[str, str]:        headers = {"Content-Type": "application/json"}        if self.api_key:            headers["Authorization"] = f"Bearer {self.api_key}"        return headers        @property    def client(self) -> httpx.AsyncClient:        if self._client is None or self._client.is_closed:            self._client = httpx.AsyncClient(                base_url=self.endpoint,                headers=self._get_headers(),                timeout=self.timeout,            )        return self._client        async def judge(        self,        agent_id: str,        action_type: str,        action_details: dict[str, Any],        agent_context: Optional[dict] = None,    ) -> dict:        """Submit an action to the Judge Layer for evaluation."""        payload = {            "agent_id": agent_id,            "action_type": action_type,            "action_details": action_details,            "agent_context": agent_context or {},        }        resp = await self.client.post("/api/v1/judge/evaluate", json=payload)        resp.raise_for_status()        return resp.json()["data"]        async def report_incident(        self,        agent_id: str,        incident_type: str,        severity: str,        description: str,        details: Optional[dict] = None,    ) -> dict:        """Report an incident manually."""        payload = {            "agent_id": agent_id,            "incident_type": incident_type,            "severity": severity,            "description": description,            "details": details or {},        }        resp = await self.client.post("/api/v1/incidents/", json=payload)        resp.raise_for_status()        return resp.json()["data"]        async def send_heartbeat(self, agent_id: str, health_score: float = 1.0) -> dict:        """Send a heartbeat for an agent."""        payload = {            "agent_id": agent_id,            "timestamp": time.time(),            "health_score": health_score,        }        resp = await self.client.post(f"/api/v1/agents/{agent_id}/heartbeat", json=payload)        resp.raise_for_status()        return resp.json()["data"]        async def close(self):        if self._client and not self._client.is_closed:            await self._client.aclose()        # Context manager support    async def __aenter__(self):        return self        async def __aexit__(self, *args):        await self.close()
+B.3: @guard Decorator — sdk/playbook_sdk/guard.py
+# sdk/playbook_sdk/guard.pyimport functoolsimport asyncioimport loggingfrom typing import Callable, Optional, Anyfrom .client import PlaybookClientfrom .exceptions import GuardBlockedError, GuardQuarantinedError, GuardErrorlogger = logging.getLogger("playbook.guard")class Guard:    """Guard decorator for agent actions."""        def __init__(        self,        agent_id: Optional[str] = None,        action_type: Optional[str] = None,        on_block: Optional[Callable] = None,        on_quarantine: Optional[Callable] = None,        endpoint: Optional[str] = None,        api_key: Optional[str] = None,    ):        self.agent_id = agent_id or "default"        self.action_type = action_type or "tool_call"        self.on_block = on_block        self.on_quarantine = on_quarantine        self.client = PlaybookClient(endpoint=endpoint, api_key=api_key)        async def evaluate(self, func_name: str, args: tuple, kwargs: dict) -> dict:        """Send action to Judge Layer for evaluation."""        action_details = {            "function": func_name,            "args_count": len(args),            "kwargs_keys": list(kwargs.keys()),            "action_summary": f"{func_name}({', '.join(repr(a)[:100] for a in args)})",        }                result = await self.client.judge(            agent_id=self.agent_id,            action_type=self.action_type,            action_details=action_details,        )        return result        def __call__(self, func: Callable) -> Callable:        @functools.wraps(func)        async def async_wrapper(*args, **kwargs):            verdict = await self.evaluate(func.__name__, args, kwargs)            decision = verdict.get("verdict", "ESCALATE")                        if decision == "ALLOW":                return await func(*args, **kwargs)                        elif decision == "BLOCK":                if self.on_block:                    return await self.on_block(verdict, *args, **kwargs)                raise GuardBlockedError(                    f"Action '{func.__name__}' blocked by PLAYBOOK Judge: {verdict.get('reason', 'No reason')}"                )                        elif decision == "QUARANTINE":                if self.on_quarantine:                    return await self.on_quarantine(verdict, *args, **kwargs)                # Run in restricted mode (log only, don't execute)                logger.warning(f"Action '{func.__name__}' quarantined: {verdict}")                return None                        elif decision == "HUMAN_REVIEW":                # Submit for review but allow (fail-open for UX, logged)                logger.info(f"Action '{func.__name__}' flagged for human review")                return await func(*args, **kwargs)                        else:  # ESCALATE or unknown                raise GuardError(f"Unexpected verdict '{decision}': {verdict}")                @functools.wraps(func)        def sync_wrapper(*args, **kwargs):            return asyncio.run(async_wrapper(*args, **kwargs))                # Return async wrapper if func is async, sync otherwise        if asyncio.iscoroutinefunction(func):            return async_wrapper        return sync_wrapper# Convenience function for simple usagedef guard(    agent_id: Optional[str] = None,    action_type: Optional[str] = None,    **kwargs,):    """Decorator factory for guarding agent actions.        Usage:        @guard(agent_id="agent-001", action_type="tool_call")        def my_agent_action(tool_name, params):            return execute_tool(tool_name, params)                # If Judge says BLOCK → GuardBlockedError raised        # If Judge says ALLOW → function executes normally    """    def decorator(func: Callable) -> Callable:        g = Guard(agent_id=agent_id, action_type=action_type, **kwargs)        return g(func)    return decorator
+B.4: SDK Exceptions — sdk/playbook_sdk/exceptions.py
+# sdk/playbook_sdk/exceptions.pyclass PlaybookError(Exception):    """Base exception for PLAYBOOK SDK."""    passclass GuardError(PlaybookError):    """Raised when the guard encounters an unexpected error."""    passclass GuardBlockedError(GuardError):    """Raised when the Judge Layer blocks an action."""    passclass GuardQuarantinedError(GuardError):    """Raised when the Judge Layer quarantines an action."""    passclass GuardTimeoutError(GuardError):    """Raised when the Judge Layer evaluation times out."""    passclass AuthenticationError(PlaybookError):    """Raised when API authentication fails."""    passclass IncidentReportError(PlaybookError):    """Raised when incident reporting fails."""    pass
+B.5: Heartbeat Sender — sdk/playbook_sdk/heartbeat.py
+# sdk/playbook_sdk/heartbeat.pyimport asyncioimport loggingfrom typing import Optionalfrom .client import PlaybookClientlogger = logging.getLogger("playbook.heartbeat")class HeartbeatSender:    """Background heartbeat sender for agent health monitoring."""        def __init__(        self,        agent_id: str,        interval: float = 60.0,  # seconds        endpoint: Optional[str] = None,        api_key: Optional[str] = None,    ):        self.agent_id = agent_id        self.interval = interval        self.client = PlaybookClient(endpoint=endpoint, api_key=api_key)        self._task: Optional[asyncio.Task] = None        self._running = False        async def _loop(self):        while self._running:            try:                await self.client.send_heartbeat(self.agent_id)                logger.debug(f"Heartbeat sent for {self.agent_id}")            except Exception as e:                logger.warning(f"Heartbeat failed: {e}")            await asyncio.sleep(self.interval)        def start(self):        if not self._running:            self._running = True            self._task = asyncio.create_task(self._loop())            logger.info(f"Heartbeat started for {self.agent_id} (every {self.interval}s)")        def stop(self):        self._running = False        if self._task:            self._task.cancel()            logger.info(f"Heartbeat stopped for {self.agent_id}")        async def close(self):        self.stop()        await self.client.close()
+B.6: SDK Package Init — sdk/playbook_sdk/__init__.py
+# sdk/playbook_sdk/__init__.py"""PLAYBOOK Python SDK — Runtime safety for AI agents.Usage:    import playbook        playbook.init(endpoint="https://playbook.internal", api_key="your-key")        @playbook.guard(agent_id="agent-001")    def my_agent_action(tool, params):        return tool.execute(params)"""from .guard import Guard, guardfrom .client import PlaybookClientfrom .heartbeat import HeartbeatSenderfrom .exceptions import (    PlaybookError,    GuardError,    GuardBlockedError,    GuardQuarantinedError,)__version__ = "0.1.0"# Global SDK state_global_client: PlaybookClient | None = Nonedef init(endpoint: str | None = None, api_key: str | None = None):    """Initialize the global PLAYBOOK client."""    global _global_client    _global_client = PlaybookClient(endpoint=endpoint, api_key=api_key)def guard(agent_id: str | None = None, action_type: str | None = None, **kwargs):    """Decorator to guard an agent action with the Judge Layer.        Requires `playbook.init()` to be called first, or endpoint/api_key    passed directly.        Example:        @playbook.guard(agent_id="agent-001", action_type="tool_call")        def execute(tool_name, params):            return tools[tool_name](**params)    """    from .guard import guard as _guard        # Use global client if initialized    if _global_client is not None:        kwargs.setdefault("endpoint", _global_client.endpoint)        kwargs.setdefault("api_key", _global_client.api_key)        return _guard(agent_id=agent_id, action_type=action_type, **kwargs)
+B.7: SDK pyproject.toml — sdk/pyproject.toml
+# sdk/pyproject.toml[project]name = "playbook-guard"version = "0.1.0"description = "PLAYBOOK Python SDK — Runtime safety for AI agents"readme = "README.md"license = {text = "MIT"}requires-python = ">=3.10"dependencies = [    "httpx>=0.27.0",    "pydantic>=2.0",][project.optional-dependencies]langchain = ["langchain>=0.2.0"]crewai = ["crewai>=0.30.0"]dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "ruff>=0.4"][project.urls]Homepage = "https://github.com/shamuddin/playbook"Documentation = "https://github.com/shamuddin/playbook/blob/main/sdk/README.md"
+B.8: Usage Example — sdk/README.md
+# Installationpip install playbook-guard# Quick Startimport playbookplaybook.init(    endpoint="https://playbook.yourcompany.com",    api_key="your-api-key",)@playbook.guard(agent_id="customer-service-agent-01")def process_customer_request(customer_id: str, request: str):    """This function is now protected by the Judge Layer."""    # If the Judge detects a risky pattern (e.g., PII leak attempt),    # a GuardBlockedError is raised before this code runs.    return agent.run(customer_id, request)# The decorator handles:# - Sending action metadata to Judge Layer# - Waiting for ALLOW/BLOCK/QUARANTINE verdict# - Blocking dangerous actions automatically# - Reporting incidents for audit trail
+Phase B Summary
+Task
+Effort
+Files
+B.1 Package structure
+30min
+New directory
+B.2 HTTP client
+2h
+client.py
+B.3 @guard decorator
+3h
+guard.py
+B.4 Exceptions
+30min
+exceptions.py
+B.5 Heartbeat sender
+1.5h
+heartbeat.py
+B.6 Package init + global state
+1h
+__init__.py
+B.7 pyproject.toml
+30min
+pyproject.toml
+B.8 README + examples
+1h
+README.md
+B.9 Unit tests
+2h
+tests/
+TOTAL
+~12h
+Phase C: Framework Middleware (P1) — 10 hours
+C.1: LangChain Callback Handler — sdk/playbook_sdk/middleware/langchain.py
+# sdk/playbook_sdk/middleware/langchain.py"""LangChain integration for PLAYBOOK.Usage:    from playbook_sdk.middleware.langchain import PlaybookCallbackHandler        handler = PlaybookCallbackHandler(agent_id="agent-001")    llm = ChatOpenAI(callbacks=[handler])        # Every tool call is now evaluated by the Judge Layer"""from typing import Any, Optionalfrom langchain.callbacks.base import AsyncCallbackHandlerfrom langchain.schema import AgentAction, AgentFinishfrom playbook_sdk.client import PlaybookClientfrom playbook_sdk.exceptions import GuardBlockedErrorclass PlaybookCallbackHandler(AsyncCallbackHandler):    """LangChain callback that guards every tool call through PLAYBOOK."""        def __init__(self, agent_id: str, endpoint: Optional[str] = None, api_key: Optional[str] = None):        self.agent_id = agent_id        self.client = PlaybookClient(endpoint=endpoint, api_key=api_key)        async def on_tool_start(        self, serialized: dict[str, Any], input_str: str, **kwargs: Any    ) -> None:        """Called before a tool is executed. Judge evaluates the action."""        tool_name = serialized.get("name", "unknown")                verdict = await self.client.judge(            agent_id=self.agent_id,            action_type="tool_call",            action_details={                "tool": tool_name,                "input": input_str[:500],  # Truncate for safety                "serialized": serialized,            },        )                decision = verdict.get("verdict", "ESCALATE")        if decision == "BLOCK":            raise GuardBlockedError(                f"Tool '{tool_name}' blocked by PLAYBOOK: {verdict.get('reason')}"            )        # ALLOW, QUARANTINE, HUMAN_REVIEW → proceed        async def close(self):        await self.client.close()
+C.2: CrewAI Task Wrapper — sdk/playbook_sdk/middleware/crewai.py
+# sdk/playbook_sdk/middleware/crewai.py"""CrewAI integration for PLAYBOOK.Usage:    from playbook_sdk.middleware.crewai import guarded_task    from crewai import Task        task = guarded_task(        agent_id="agent-001",        description="Research competitor pricing",        agent=research_agent,    )"""from typing import Optionalfrom crewai import Task, Agentfrom playbook_sdk.client import PlaybookClientfrom playbook_sdk.exceptions import GuardBlockedErrorclass GuardedTask(Task):    """A CrewAI Task that guards execution through PLAYBOOK."""        def __init__(self, agent_id: str, *args, endpoint: Optional[str] = None, api_key: Optional[str] = None, **kwargs):        self.playbook_agent_id = agent_id        self.playbook_client = PlaybookClient(endpoint=endpoint, api_key=api_key)        super().__init__(*args, **kwargs)        def execute(self, *args, **kwargs):        """Override execute to add Judge Layer evaluation."""        action_details = {            "task_description": self.description[:500],            "expected_output": self.expected_output[:200] if self.expected_output else None,            "agent_role": self.agent.role if self.agent else None,        }                # Run judge evaluation        import asyncio        verdict = asyncio.run(self.playbook_client.judge(            agent_id=self.playbook_agent_id,            action_type="task_execution",            action_details=action_details,        ))                decision = verdict.get("verdict", "ESCALATE")        if decision == "BLOCK":            raise GuardBlockedError(f"Task blocked: {verdict.get('reason')}")                # Proceed with execution        return super().execute(*args, **kwargs)def guarded_task(agent_id: str, *args, **kwargs) -> GuardedTask:    """Factory function to create a PLAYBOOK-guarded CrewAI Task."""    return GuardedTask(agent_id=agent_id, *args, **kwargs)
+C.3: Add Heartbeat Endpoint to Backend — backend/app/routers/agents.py
+The original analysis falsely claimed this exists. It does NOT. Add it:
+# backend/app/routers/agents.py# ADD this endpoint:@router.post("/{agent_id}/heartbeat")async def agent_heartbeat(    agent_id: str,    data: dict,    db: AsyncSession = Depends(get_db),    current_user: User = Depends(get_current_user),):    """Receive a heartbeat from a monitored agent.        Used by the Python SDK to report agent health.    """    result = await db.execute(select(Agent).where(Agent.system_id == agent_id))    agent = result.scalar_one_or_none()        if not agent:        # Auto-register unknown agents on first heartbeat        agent = Agent(            system_id=agent_id,            name=f"Agent-{agent_id[:8]}",            status="online",            health_score=data.get("health_score", 1.0),            last_seen=utc_now(),        )        db.add(agent)    else:        agent.status = "online"        agent.health_score = data.get("health_score", agent.health_score)        agent.last_seen = utc_now()        # Log heartbeat    heartbeat = AgentHealthHistory(        agent_id=agent.id,        health_score=data.get("health_score", 1.0),        recorded_at=utc_now(),    )    db.add(heartbeat)    await db.commit()        return StandardResponse(        success=True,        data={"agent_id": agent_id, "status": "online"},    )
+Phase C Summary
+Task
+Effort
+Files
+C.1 LangChain handler
+4h
+middleware/langchain.py
+C.2 CrewAI wrapper
+3h
+middleware/crewai.py
+C.3 Heartbeat endpoint (backend)
+1h
+routers/agents.py
+C.4 Tests for middleware
+2h
+tests/test_middleware.py
+TOTAL
+~10h
+Phase D: Notification Connectors (P1) — 8 hours
+Currently, the NOTIFY action in response_engine.py is a no-op stub (stdout = "Notification sent"). Replace with real connectors.
+D.1: Slack Webhook Connector — NEW FILE
+# backend/app/services/notifications/slack.py"""Slack notification connector for PLAYBOOK."""import jsonimport loggingfrom typing import Optionalimport httpxlogger = logging.getLogger("playbook.notifications.slack")async def send_slack_notification(    webhook_url: str,    incident: dict,    severity_emoji: Optional[dict] = None,) -> bool:    """Send incident notification to Slack via incoming webhook."""        emojis = severity_emoji or {        "CRITICAL": "🔴",        "HIGH": "🟠",        "MEDIUM": "🟡",        "LOW": "🟢",    }        severity = incident.get("severity", "MEDIUM")    emoji = emojis.get(severity, "⚪")        blocks = {        "blocks": [            {                "type": "header",                "text": {                    "type": "plain_text",                    "text": f"{emoji} PLAYBOOK Alert: {severity} Incident Detected"                }            },            {                "type": "section",                "fields": [                    {"type": "mrkdwn", "text": f"*Incident Type:*\n{incident.get('incident_type', 'Unknown')}"},                    {"type": "mrkdwn", "text": f"*Agent:*\n{incident.get('agent_id', 'Unknown')}"},                    {"type": "mrkdwn", "text": f"*Severity:*\n{severity}"},                    {"type": "mrkdwn", "text": f"*Time:*\n{incident.get('detected_at', 'Now')}"},                ]            },            {                "type": "section",                "text": {                    "type": "mrkdwn",                    "text": f"*Description:*\n{incident.get('description', 'No description')[:500]}"                }            },            {                "type": "actions",                "elements": [                    {                        "type": "button",                        "text": {"type": "plain_text", "text": "View in PLAYBOOK"},                        "url": f"{incident.get('dashboard_url', 'http://localhost:5173')}/incidents/{incident.get('id', '')}",                        "style": "danger" if severity in ("CRITICAL", "HIGH") else "primary"                    }                ]            }        ]    }        try:        async with httpx.AsyncClient(timeout=10.0) as client:            resp = await client.post(webhook_url, json=blocks)            resp.raise_for_status()            logger.info(f"Slack notification sent for incident {incident.get('id')}")            return True    except Exception as e:        logger.error(f"Failed to send Slack notification: {e}")        return False
+D.2: Email SMTP Connector — NEW FILE
+# backend/app/services/notifications/email.py"""Email notification connector for PLAYBOOK."""import loggingimport smtplibfrom email.mime.text import MIMETextfrom email.mime.multipart import MIMEMultipartfrom typing import Listfrom app.core.config import settingslogger = logging.getLogger("playbook.notifications.email")async def send_email_notification(    recipients: List[str],    incident: dict,    smtp_host: str | None = None,    smtp_port: int = 587,    smtp_user: str | None = None,    smtp_password: str | None = None,    sender: str | None = None,) -> bool:    """Send incident notification via SMTP."""        smtp_host = smtp_host or settings.smtp_host    smtp_user = smtp_user or settings.smtp_user    smtp_password = smtp_password or settings.smtp_password    sender = sender or settings.smtp_sender or smtp_user        if not all([smtp_host, smtp_user, smtp_password]):        logger.warning("SMTP not configured, skipping email notification")        return False        subject = f"[PLAYBOOK {incident.get('severity', 'ALERT')}] {incident.get('incident_type', 'Incident')} - {incident.get('agent_id', 'Unknown')}"        body = f"""PLAYBOOK Incident Alert{'=' * 50}Type:      {incident.get('incident_type', 'Unknown')}Severity:  {incident.get('severity', 'Unknown')}Agent:     {incident.get('agent_id', 'Unknown')}Time:      {incident.get('detected_at', 'Unknown')}ID:        {incident.get('id', 'Unknown')}Description:{incident.get('description', 'No description')}View in PLAYBOOK: {incident.get('dashboard_url', '')}/incidents/{incident.get('id', '')}"""        msg = MIMEMultipart()    msg["From"] = sender    msg["To"] = ", ".join(recipients)    msg["Subject"] = subject    msg.attach(MIMEText(body, "plain"))        try:        with smtplib.SMTP(smtp_host, smtp_port) as server:            server.starttls()            server.login(smtp_user, smtp_password)            server.send_message(msg)        logger.info(f"Email sent to {len(recipients)} recipients for incident {incident.get('id')}")        return True    except Exception as e:        logger.error(f"Failed to send email: {e}")        return False
+D.3: Update Response Engine to Use Real Notifications — backend/app/services/response_engine.py
+# backend/app/services/response_engine.py# MODIFY the NOTIFY action handler:async def _handle_notify(self, ctx: ActionContext) -> ActionResult:    """Send notification to configured channels."""    from app.services.notifications.slack import send_slack_notification    from app.services.notifications.email import send_email_notification        incident = ctx.to_dict()    results = {}        # Slack notification    if settings.slack_webhook_url:        slack_ok = await send_slack_notification(            webhook_url=settings.slack_webhook_url,            incident=incident,        )        results["slack"] = "sent" if slack_ok else "failed"    else:        results["slack"] = "not_configured"        # Email notification    if settings.notification_email_recipients and settings.smtp_host:        email_ok = await send_email_notification(            recipients=settings.notification_email_recipients,            incident=incident,        )        results["email"] = "sent" if email_ok else "failed"    else:        results["email"] = "not_configured"        return ActionResult(        status=ActionStatus.SUCCESS,        stdout=f"Notifications: {results}",        metadata={"channels": results},    )
+D.4: Add Notification Settings to Config — backend/app/core/config.py
+# backend/app/core/config.py# ADD to Settings class:# Notification settingsslack_webhook_url: str = Field(default="", description="Slack incoming webhook URL")smtp_host: str = Field(default="", description="SMTP server hostname")smtp_port: int = Field(default=587)smtp_user: str = Field(default="")smtp_password: str = Field(default="")smtp_sender: str = Field(default="")notification_email_recipients: list[str] = Field(default_factory=list)# PagerDuty integrationpagerduty_integration_key: str = Field(default="", description="PagerDuty Events API v2 integration key")pagerduty_service_id: str = Field(default="")
+Phase D Summary
+Task
+Effort
+Files
+D.1 Slack connector
+2h
+services/notifications/slack.py
+D.2 Email connector
+2h
+services/notifications/email.py
+D.3 Response engine integration
+1h
+response_engine.py
+D.4 Config additions
+30min
+core/config.py
+D.5 PagerDuty connector
+2h
+services/notifications/pagerduty.py
+D.6 Unit tests
+30min
+tests/test_notifications.py
+TOTAL
+~8h
+Phase E: Frontend Completion (P1) — 20 hours
+E.1: Shared API Client — frontend/src/lib/api.ts — NEW FILE
+// frontend/src/lib/api.tsconst API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";interface ApiResponse<T> {  success: boolean;  data: T;  message?: string;  total?: number;}class ApiError extends Error {  constructor(    public status: number,    public statusText: string,    public body: unknown  ) {    super(`API Error ${status}: ${statusText}`);    this.name = "ApiError";  }}export async function apiGet<T>(path: string): Promise<T> {  const token = localStorage.getItem("playbook_token");  const resp = await fetch(`${API_BASE}${path}`, {    headers: {      Authorization: token ? `Bearer ${token}` : "",      "Content-Type": "application/json",    },  });  if (!resp.ok) throw new ApiError(resp.status, resp.statusText, await resp.json().catch(() => null));  const json: ApiResponse<T> = await resp.json();  return json.data;}export async function apiPost<T>(path: string, body: unknown): Promise<T> {  const token = localStorage.getItem("playbook_token");  const resp = await fetch(`${API_BASE}${path}`, {    method: "POST",    headers: {      Authorization: token ? `Bearer ${token}` : "",      "Content-Type": "application/json",    },    body: JSON.stringify(body),  });  if (!resp.ok) throw new ApiError(resp.status, resp.statusText, await resp.json().catch(() => null));  const json: ApiResponse<T> = await resp.json();  return json.data;}export async function apiPut<T>(path: string, body: unknown): Promise<T> {  const token = localStorage.getItem("playbook_token");  const resp = await fetch(`${API_BASE}${path}`, {    method: "PUT",    headers: {      Authorization: token ? `Bearer ${token}` : "",      "Content-Type": "application/json",    },    body: JSON.stringify(body),  });  if (!resp.ok) throw new ApiError(resp.status, resp.statusText, await resp.json().catch(() => null));  const json: ApiResponse<T> = await resp.json();  return json.data;}export async function apiDelete(path: string): Promise<void> {  const token = localStorage.getItem("playbook_token");  const resp = await fetch(`${API_BASE}${path}`, {    method: "DELETE",    headers: {      Authorization: token ? `Bearer ${token}` : "",    },  });  if (!resp.ok) throw new ApiError(resp.status, resp.statusText, await resp.json().catch(() => null));}export { API_BASE, ApiError };
+E.2: Loading Spinner Component — frontend/src/components/LoadingSpinner.tsx — NEW
+// frontend/src/components/LoadingSpinner.tsxinterface Props {  size?: "sm" | "md" | "lg";  className?: string;}export default function LoadingSpinner({ size = "md", className = "" }: Props) {  const sizeClasses = {    sm: "w-4 h-4 border-2",    md: "w-8 h-8 border-3",    lg: "w-12 h-12 border-4",  };  return (    <div className={`flex items-center justify-center ${className}`}>      <div        className={`${sizeClasses[size]} border-gray-300 border-t-blue-600 rounded-full animate-spin`}        role="status"        aria-label="Loading"      />    </div>  );}
+E.3: Error Boundary — frontend/src/components/ErrorBoundary.tsx — NEW
+// frontend/src/components/ErrorBoundary.tsximport { Component, type ReactNode } from "react";interface Props {  children: ReactNode;  fallback?: ReactNode;}interface State {  hasError: boolean;  error: Error | null;}export default class ErrorBoundary extends Component<Props, State> {  state: State = { hasError: false, error: null };  static getDerivedStateFromError(error: Error): State {    return { hasError: true, error };  }  render() {    if (this.state.hasError) {      return (        this.props.fallback || (          <div className="flex flex-col items-center justify-center min-h-[300px] p-6">            <div className="text-red-500 text-4xl mb-4">⚠</div>            <h2 className="text-lg font-semibold text-gray-900 mb-2">Something went wrong</h2>            <p className="text-sm text-gray-500 mb-4 max-w-md text-center">              {this.state.error?.message || "An unexpected error occurred"}            </p>            <button              onClick={() => window.location.reload()}              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"            >              Reload Page            </button>          </div>        )      );    }    return this.props.children;  }}
+E.4: Toast/Notification Component — frontend/src/components/Toast.tsx — NEW
+// frontend/src/components/Toast.tsximport { useEffect } from "react";import { XCircle, CheckCircle, AlertTriangle, Info } from "lucide-react";export type ToastType = "success" | "error" | "warning" | "info";interface ToastProps {  type: ToastType;  message: string;  onClose: () => void;  duration?: number;}const icons = {  success: CheckCircle,  error: XCircle,  warning: AlertTriangle,  info: Info,};const colors = {  success: "bg-green-50 text-green-800 border-green-200",  error: "bg-red-50 text-red-800 border-red-200",  warning: "bg-yellow-50 text-yellow-800 border-yellow-200",  info: "bg-blue-50 text-blue-800 border-blue-200",};export default function Toast({ type, message, onClose, duration = 5000 }: ToastProps) {  useEffect(() => {    const timer = setTimeout(onClose, duration);    return () => clearTimeout(timer);  }, [onClose, duration]);  const Icon = icons[type];  return (    <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg ${colors[type]} max-w-md`}>      <Icon size={18} />      <p className="text-sm font-medium">{message}</p>      <button onClick={onClose} className="ml-2 text-current opacity-60 hover:opacity-100">        ×      </button>    </div>  );}// Toast container + hookimport { createContext, useContext, useState, useCallback, type ReactNode } from "react";interface ToastItem {  id: string;  type: ToastType;  message: string;}interface ToastContextType {  showToast: (type: ToastType, message: string) => void;}const ToastContext = createContext<ToastContextType | null>(null);export function ToastProvider({ children }: { children: ReactNode }) {  const [toasts, setToasts] = useState<ToastItem[]>([]);  const showToast = useCallback((type: ToastType, message: string) => {    const id = Date.now().toString();    setToasts((prev) => [...prev, { id, type, message }]);  }, []);  const removeToast = useCallback((id: string) => {    setToasts((prev) => prev.filter((t) => t.id !== id));  }, []);  return (    <ToastContext.Provider value={{ showToast }}>      {children}      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">        {toasts.map((t) => (          <Toast key={t.id} type={t.type} message={t.message} onClose={() => removeToast(t.id)} />        ))}      </div>    </ToastContext.Provider>  );}export function useToast() {  const ctx = useContext(ToastContext);  if (!ctx) throw new Error("useToast must be inside ToastProvider");  return ctx;}
+E.5: Real Settings Page — frontend/src/pages/SettingsPage.tsx — COMPLETE REWRITE
+// frontend/src/pages/SettingsPage.tsx — COMPLETE REWRITE (~200 lines)import { useState, useEffect } from "react";import { Settings, Bell, Shield, Database, Mail, Slack, Key } from "lucide-react";import { apiGet, apiPost } from "../lib/api";import LoadingSpinner from "../components/LoadingSpinner";import { useToast } from "../components/Toast";interface SettingsData {  general: {    org_name: string;    timezone: string;    session_timeout: number;  };  notifications: {    slack_webhook_url: string;    smtp_host: string;    smtp_port: number;    smtp_user: string;    notification_emails: string[];  };  security: {    max_login_attempts: number;    password_policy: string;    mfa_enabled: boolean;  };  judge: {    confidence_threshold: number;    auto_block_critical: boolean;    human_review_for_high: boolean;  };}const tabs = [  { id: "general", label: "General", icon: Settings },  { id: "notifications", label: "Notifications", icon: Bell },  { id: "security", label: "Security", icon: Shield },  { id: "judge", label: "Judge Layer", icon: Database },];export default function SettingsPage() {  const [activeTab, setActiveTab] = useState("general");  const [settings, setSettings] = useState<SettingsData | null>(null);  const [loading, setLoading] = useState(true);  const [saving, setSaving] = useState(false);  const { showToast } = useToast();  useEffect(() => {    loadSettings();  }, []);  const loadSettings = async () => {    try {      setLoading(true);      const data = await apiGet<SettingsData>("/settings");      setSettings(data);    } catch (err: any) {      showToast("error", `Failed to load settings: ${err.message}`);      // Load defaults on error      setSettings({        general: { org_name: "", timezone: "UTC", session_timeout: 30 },        notifications: { slack_webhook_url: "", smtp_host: "", smtp_port: 587, smtp_user: "", notification_emails: [] },        security: { max_login_attempts: 5, password_policy: "strong", mfa_enabled: false },        judge: { confidence_threshold: 0.7, auto_block_critical: true, human_review_for_high: true },      });    } finally {      setLoading(false);    }  };  const saveSettings = async () => {    if (!settings) return;    try {      setSaving(true);      await apiPost("/settings", settings);      showToast("success", "Settings saved successfully");    } catch (err: any) {      showToast("error", `Failed to save: ${err.message}`);    } finally {      setSaving(false);    }  };  if (loading) return <LoadingSpinner size="lg" className="min-h-[400px]" />;  if (!settings) return <div className="p-6 text-red-600">Failed to load settings</div>;  const ActiveIcon = tabs.find((t) => t.id === activeTab)?.icon || Settings;  return (    <div className="space-y-6">      <div className="flex items-center gap-3">        <ActiveIcon size={24} className="text-gray-700" />        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>      </div>      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">        {tabs.map((tab) => {          const Icon = tab.icon;          return (            <button              key={tab.id}              onClick={() => setActiveTab(tab.id)}              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${                activeTab === tab.id                  ? "bg-white text-gray-900 shadow-sm"                  : "text-gray-600 hover:text-gray-900"              }`}            >              <Icon size={16} />              {tab.label}            </button>          );        })}      </div>      <div className="card">        {activeTab === "general" && (          <div className="space-y-4 max-w-lg">            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">Organization Name</label>              <input                type="text"                value={settings.general.org_name}                onChange={(e) => setSettings({ ...settings, general: { ...settings.general, org_name: e.target.value } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"              />            </div>            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">Timezone</label>              <select                value={settings.general.timezone}                onChange={(e) => setSettings({ ...settings, general: { ...settings.general, timezone: e.target.value } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"              >                <option value="UTC">UTC</option>                <option value="America/New_York">Eastern (ET)</option>                <option value="America/Chicago">Central (CT)</option>                <option value="America/Denver">Mountain (MT)</option>                <option value="America/Los_Angeles">Pacific (PT)</option>                <option value="Europe/London">London (GMT)</option>                <option value="Europe/Paris">Paris (CET)</option>                <option value="Asia/Dubai">Dubai (GST)</option>                <option value="Asia/Singapore">Singapore (SGT)</option>                <option value="Asia/Tokyo">Tokyo (JST)</option>              </select>            </div>            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">Session Timeout (minutes)</label>              <input                type="number"                min={5}                max={240}                value={settings.general.session_timeout}                onChange={(e) => setSettings({ ...settings, general: { ...settings.general, session_timeout: parseInt(e.target.value) || 30 } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"              />            </div>          </div>        )}        {activeTab === "notifications" && (          <div className="space-y-4 max-w-lg">            <div className="flex items-center gap-2 mb-4">              <Slack size={18} className="text-purple-600" />              <h3 className="font-semibold text-gray-900">Slack Integration</h3>            </div>            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">Webhook URL</label>              <input                type="password"                placeholder="https://hooks.slack.com/services/..."                value={settings.notifications.slack_webhook_url}                onChange={(e) => setSettings({ ...settings, notifications: { ...settings.notifications, slack_webhook_url: e.target.value } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"              />              <p className="text-xs text-gray-500 mt-1">Create at: Slack App → Incoming Webhooks</p>            </div>            <hr className="border-gray-200" />            <div className="flex items-center gap-2 mb-4">              <Mail size={18} className="text-blue-600" />              <h3 className="font-semibold text-gray-900">Email (SMTP)</h3>            </div>            <div className="grid grid-cols-2 gap-4">              <div>                <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>                <input                  type="text"                  placeholder="smtp.gmail.com"                  value={settings.notifications.smtp_host}                  onChange={(e) => setSettings({ ...settings, notifications: { ...settings.notifications, smtp_host: e.target.value } })}                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"                />              </div>              <div>                <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Port</label>                <input                  type="number"                  value={settings.notifications.smtp_port}                  onChange={(e) => setSettings({ ...settings, notifications: { ...settings.notifications, smtp_port: parseInt(e.target.value) || 587 } })}                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"                />              </div>            </div>            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Username</label>              <input                type="text"                value={settings.notifications.smtp_user}                onChange={(e) => setSettings({ ...settings, notifications: { ...settings.notifications, smtp_user: e.target.value } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"              />            </div>          </div>        )}        {activeTab === "security" && (          <div className="space-y-4 max-w-lg">            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">Max Login Attempts</label>              <input                type="number"                min={1}                max={20}                value={settings.security.max_login_attempts}                onChange={(e) => setSettings({ ...settings, security: { ...settings.security, max_login_attempts: parseInt(e.target.value) || 5 } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"              />            </div>            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">Password Policy</label>              <select                value={settings.security.password_policy}                onChange={(e) => setSettings({ ...settings, security: { ...settings.security, password_policy: e.target.value } })}                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"              >                <option value="basic">Basic (8+ chars)</option>                <option value="strong">Strong (12+ chars, mixed case, numbers)</option>                <option value="enterprise">Enterprise (16+ chars, symbols, MFA required)</option>              </select>            </div>            <div className="flex items-center gap-3">              <input                type="checkbox"                id="mfa"                checked={settings.security.mfa_enabled}                onChange={(e) => setSettings({ ...settings, security: { ...settings.security, mfa_enabled: e.target.checked } })}                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"              />              <label htmlFor="mfa" className="text-sm font-medium text-gray-700">Require Multi-Factor Authentication</label>            </div>          </div>        )}        {activeTab === "judge" && (          <div className="space-y-4 max-w-lg">            <div>              <label className="block text-sm font-medium text-gray-700 mb-1">                Confidence Threshold: {settings.judge.confidence_threshold}              </label>              <input                type="range"                min={0.1}                max={1.0}                step={0.05}                value={settings.judge.confidence_threshold}                onChange={(e) => setSettings({ ...settings, judge: { ...settings.judge, confidence_threshold: parseFloat(e.target.value) } })}                className="w-full"              />              <p className="text-xs text-gray-500 mt-1">                Below this threshold, actions are sent to human review. Higher = more strict.              </p>            </div>            <div className="flex items-center gap-3">              <input                type="checkbox"                id="auto-block"                checked={settings.judge.auto_block_critical}                onChange={(e) => setSettings({ ...settings, judge: { ...settings.judge, auto_block_critical: e.target.checked } })}                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"              />              <label htmlFor="auto-block" className="text-sm font-medium text-gray-700">Auto-block all CRITICAL severity actions</label>            </div>            <div className="flex items-center gap-3">              <input                type="checkbox"                id="human-review-high"                checked={settings.judge.human_review_for_high}                onChange={(e) => setSettings({ ...settings, judge: { ...settings.judge, human_review_for_high: e.target.checked } })}                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"              />              <label htmlFor="human-review-high" className="text-sm font-medium text-gray-700">Require human review for HIGH severity</label>            </div>          </div>        )}        <div className="mt-6 flex gap-3">          <button            onClick={saveSettings}            disabled={saving}            className="btn-primary flex items-center gap-2"          >            {saving ? <LoadingSpinner size="sm" /> : null}            {saving ? "Saving..." : "Save Settings"}          </button>          <button            onClick={loadSettings}            className="btn-secondary"          >            Reset          </button>        </div>      </div>    </div>  );}
+E.6: Backend Settings Endpoints — backend/app/routers/settings.py — NEW FILE
+# backend/app/routers/settings.pyfrom fastapi import APIRouter, Depends, HTTPExceptionfrom sqlalchemy.ext.asyncio import AsyncSessionfrom app.database import get_dbfrom app.models import Userfrom app.schemas import StandardResponsefrom app.core.security import get_current_userfrom app.core.config import settingsimport jsonrouter = APIRouter(prefix="/settings", tags=["settings"])# In-memory store for now (migrate to DB table later)_settings_store: dict = {}@router.get("", response_model=StandardResponse)async def get_settings(    current_user: User = Depends(get_current_user),):    """Get current system settings."""    merged = {        "general": _settings_store.get("general", {            "org_name": "",            "timezone": "UTC",            "session_timeout": 30,        }),        "notifications": {            "slack_webhook_url": "***" if settings.slack_webhook_url else "",            "smtp_host": settings.smtp_host,            "smtp_port": settings.smtp_port,            "smtp_user": settings.smtp_user,            "notification_emails": settings.notification_email_recipients,            **_settings_store.get("notifications", {}),        },        "security": _settings_store.get("security", {            "max_login_attempts": 5,            "password_policy": "strong",            "mfa_enabled": False,        }),        "judge": _settings_store.get("judge", {            "confidence_threshold": settings.judge_confidence_threshold or 0.7,            "auto_block_critical": True,            "human_review_for_high": True,        }),    }    return StandardResponse(success=True, data=merged)@router.post("", response_model=StandardResponse)async def update_settings(    data: dict,    current_user: User = Depends(get_current_user),):    """Update system settings. Admin only."""    if current_user.role not in (UserRole.ADMIN, UserRole.ANALYST):        raise HTTPException(status_code=403, detail="Admin or Analyst role required")        global _settings_store    for key in ["general", "notifications", "security", "judge"]:        if key in data:            _settings_store.setdefault(key, {})            _settings_store[key].update(data[key])        return StandardResponse(success=True, message="Settings saved")
+E.7: Login Page — frontend/src/pages/LoginPage.tsx — NEW
+// frontend/src/pages/LoginPage.tsximport { useState } from "react";import { Shield, Eye, EyeOff } from "lucide-react";export default function LoginPage() {  const [email, setEmail] = useState("");  const [password, setPassword] = useState("");  const [showPassword, setShowPassword] = useState(false);  const [loading, setLoading] = useState(false);  const [error, setError] = useState("");  const handleLogin = async (e: React.FormEvent) => {    e.preventDefault();    setLoading(true);    setError("");    try {      const resp = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1"}/auth/login`, {        method: "POST",        headers: { "Content-Type": "application/json" },        body: JSON.stringify({ email, password }),      });      if (!resp.ok) {        const err = await resp.json();        throw new Error(err.message || "Login failed");      }      const data = await resp.json();      localStorage.setItem("playbook_token", data.data.access_token);      localStorage.setItem("playbook_user", JSON.stringify(data.data.user));      window.location.href = "/";    } catch (err: any) {      setError(err.message || "Invalid email or password");    } finally {      setLoading(false);    }  };  return (    <div className="min-h-screen flex items-center justify-center bg-gray-50">      <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-lg">        <div className="flex items-center justify-center gap-3 mb-8">          <Shield size={32} className="text-blue-600" />          <h1 className="text-2xl font-bold text-gray-900">PLAYBOOK</h1>        </div>        <p className="text-center text-gray-500 mb-6">Sign in to your account</p>        {error && (          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>        )}        <form onSubmit={handleLogin} className="space-y-4">          <div>            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>            <input              type="email"              required              value={email}              onChange={(e) => setEmail(e.target.value)}              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"              placeholder="you@company.com"            />          </div>          <div>            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>            <div className="relative">              <input                type={showPassword ? "text" : "password"}                required                value={password}                onChange={(e) => setPassword(e.target.value)}                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"                placeholder="••••••••"              />              <button                type="button"                onClick={() => setShowPassword(!showPassword)}                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"              >                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}              </button>            </div>          </div>          <button            type="submit"            disabled={loading}            className="w-full py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"          >            {loading ? "Signing in..." : "Sign In"}          </button>        </form>      </div>    </div>  );}
+E.8: Update App.tsx with Auth Router — frontend/src/App.tsx — MODIFY
+// frontend/src/App.tsx — MODIFIEDimport { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";import { ToastProvider } from "./components/Toast";import LoginPage from "./pages/LoginPage";import Layout from "./components/Layout";// ... existing importsfunction isAuthenticated() {  return !!localStorage.getItem("playbook_token");}function ProtectedRoute({ children }: { children: React.ReactNode }) {  return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;}function App() {  return (    <ToastProvider>      <BrowserRouter>        <Routes>          <Route path="/login" element={<LoginPage />} />          <Route            path="/"            element={              <ProtectedRoute>                <Layout />              </ProtectedRoute>            }          >            <Route index element={<DashboardPage />} />            <Route path="dashboard" element={<DashboardPage />} />            {/* ... all existing routes */}            <Route path="settings" element={<SettingsPage />} />          </Route>        </Routes>      </BrowserRouter>    </ToastProvider>  );}export default App;
+E.9: Update All Pages to Use Shared API Client — BATCH UPDATE
+In EVERY page file, replace the inline fetch patterns with:
+import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";import LoadingSpinner from "../components/LoadingSpinner";import { useToast } from "../components/Toast";
+Phase E Summary
+Task
+Effort
+Files
+E.1 Shared API client
+1h
+lib/api.ts (new)
+E.2 LoadingSpinner component
+30min
+components/LoadingSpinner.tsx
+E.3 ErrorBoundary
+30min
+components/ErrorBoundary.tsx
+E.4 Toast component + hook
+1.5h
+components/Toast.tsx
+E.5 Settings page (full rewrite)
+4h
+pages/SettingsPage.tsx
+E.6 Backend settings endpoints
+1.5h
+routers/settings.py
+E.7 Login page
+2h
+pages/LoginPage.tsx
+E.8 Update App.tsx with auth
+30min
+App.tsx
+E.9 Update all pages to use shared API
+3h
+All 11 page files
+E.10 Header title fix
+30min
+components/Header.tsx
+E.11 WebSocket reconnect
+1.5h
+hooks/useWebSocket.ts
+E.12 404 page
+30min
+pages/NotFoundPage.tsx
+TOTAL
+~17h
+Phase F: Backend Completion (P1) — 10 hours
+F.1: Add Missing Database Tables — backend/app/models.py
+# backend/app/models.py — ADD these models:class RawEvent(Base):    """Raw log events from agent monitoring."""    __tablename__ = "raw_events"        id: Mapped[str] = mapped_column(String(26), primary_key=True, default=generate_ulid)    source: Mapped[str] = mapped_column(String(255), nullable=False)  # agent_id or system    event_type: Mapped[str] = mapped_column(String(100), nullable=False)    payload: Mapped[dict] = mapped_column(JSON, default=dict)    severity: Mapped[str] = mapped_column(String(20), default="INFO")    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)    processed: Mapped[bool] = mapped_column(default=False)    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)    correlation_id: Mapped[str | None] = mapped_column(String(26), nullable=True)class AnomalyScore(Base):    """Anomaly detection scores for agent behavior."""    __tablename__ = "anomaly_scores"        id: Mapped[str] = mapped_column(String(26), primary_key=True, default=generate_ulid)    agent_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)    metric: Mapped[str] = mapped_column(String(100), nullable=False)  # latency, error_rate, token_usage, etc.    score: Mapped[float] = mapped_column(nullable=False)  # 0.0 to 1.0, higher = more anomalous    baseline_mean: Mapped[float | None] = mapped_column(nullable=True)    baseline_std: Mapped[float | None] = mapped_column(nullable=True)    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)    is_anomaly: Mapped[bool] = mapped_column(default=False)    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)class UserSettings(Base):    """Per-user settings storage."""    __tablename__ = "user_settings"        id: Mapped[str] = mapped_column(String(26), primary_key=True, default=generate_ulid)    user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id"), nullable=False)    category: Mapped[str] = mapped_column(String(50), nullable=False)  # general, notifications, etc.    key: Mapped[str] = mapped_column(String(100), nullable=False)    value: Mapped[str] = mapped_column(Text, nullable=True)    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+F.2: PostgreSQL Support — backend/app/database.py — MODIFY
+# backend/app/database.py# ADD PostgreSQL support with SQLite fallback:from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmakerDATABASE_URL = settings.database_url or "sqlite+aiosqlite:///./playbook.db"# PostgreSQL checkif "postgresql" in DATABASE_URL:    engine = create_async_engine(        DATABASE_URL,        pool_size=settings.db_pool_size or 10,        max_overflow=settings.db_max_overflow or 20,        pool_pre_ping=True,        echo=settings.db_echo or False,    )else:    # SQLite (for development)    engine = create_async_engine(        DATABASE_URL,        connect_args={"check_same_thread": False},        poolclass=NullPool,    )
+F.3: Add PostgreSQL to docker-compose.yml
+# docker-compose.yml — ADD PostgreSQL service:  postgres:    image: postgres:16-alpine    environment:      POSTGRES_DB: playbook      POSTGRES_USER: playbook      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-playbook_dev}    volumes:      - postgres_data:/var/lib/postgresql/data    ports:      - "5432:5432"    healthcheck:      test: ["CMD-SHELL", "pg_isready -U playbook"]      interval: 5s      timeout: 5s      retries: 5  backend:    # ... existing config    environment:      - DATABASE_URL=postgresql+asyncpg://playbook:${POSTGRES_PASSWORD:-playbook_dev}@postgres/playbook    depends_on:      postgres:        condition: service_healthyvolumes:  postgres_data:
+F.4: Implement 5 Missing Response Actions — backend/app/services/response_engine.py
+Currently 5 of 8 action types are no-op stubs. Implement real behavior:
+# In response_engine.py, replace stub handlers:async def _handle_escalate(self, ctx: ActionContext) -> ActionResult:    """Escalate to senior operator. Creates a high-priority incident."""    from app.services.notifications.slack import send_slack_notification        escalation_incident = await self._create_incident(ctx, severity="HIGH", auto_assign=True)        # Send immediate escalation notification    if settings.slack_webhook_url:        await send_slack_notification(            settings.slack_webhook_url,            {                **escalation_incident,                "description": f"ESCALATED: {ctx.incident_type} — Requires immediate attention",            }        )        return ActionResult(        status=ActionStatus.SUCCESS,        stdout=f"Escalated to senior operator. Incident: {escalation_incident.get('id')}",        metadata={"escalation_incident_id": escalation_incident.get("id")},    )async def _handle_quarantine(self, ctx: ActionContext) -> ActionResult:    """Quarantine the agent — disable further actions, isolate from systems."""    from sqlalchemy import update        # Mark agent as quarantined    await self.db.execute(        update(Agent)        .where(Agent.system_id == ctx.agent_id)        .values(status="quarantined", updated_at=utc_now())    )    await self.db.commit()        quarantine_incident = await self._create_incident(ctx, severity="CRITICAL")        return ActionResult(        status=ActionStatus.SUCCESS,        stdout=f"Agent {ctx.agent_id} quarantined. Incident: {quarantine_incident.get('id')}",        metadata={"quarantine_incident_id": quarantine_incident.get("id"), "agent_status": "quarantined"},    )async def _handle_log_only(self, ctx: ActionContext) -> ActionResult:    """Log the incident but take no action."""    incident = await self._create_incident(ctx, severity="LOW")    return ActionResult(        status=ActionStatus.SUCCESS,        stdout=f"Logged. Incident: {incident.get('id')}",        metadata={"incident_id": incident.get("id"), "action_taken": "none"},    )async def _handle_rate_limit(self, ctx: ActionContext) -> ActionResult:    """Apply rate limiting to the agent."""    from sqlalchemy import update        # Reduce agent health score (triggers circuit breaker if too low)    await self.db.execute(        update(Agent)        .where(Agent.system_id == ctx.agent_id)        .values(health_score=0.3, status="degraded", updated_at=utc_now())    )    await self.db.commit()        incident = await self._create_incident(ctx, severity="MEDIUM")        return ActionResult(        status=ActionStatus.SUCCESS,        stdout=f"Rate limited agent {ctx.agent_id}. Health score reduced to 0.3",        metadata={"incident_id": incident.get("id"), "new_health_score": 0.3},    )async def _handle_sandbox(self, ctx: ActionContext) -> ActionResult:    """Execute action in sandbox/isolated environment."""    incident = await self._create_incident(ctx, severity="MEDIUM")        # Flag for sandbox execution (downstream systems check this flag)    return ActionResult(        status=ActionStatus.SUCCESS,        stdout=f"Sandbox execution approved. Incident: {incident.get('id')}",        metadata={            "incident_id": incident.get("id"),            "sandbox_mode": True,            "warning": "Action executed in isolated environment",        },    )
+Phase F Summary
+Task
+Effort
+Files
+F.1 Add missing DB tables
+2h
+models.py
+F.2 PostgreSQL support
+1.5h
+database.py, config.py
+F.3 docker-compose PostgreSQL
+30min
+docker-compose.yml
+F.4 Implement 5 stub actions
+3h
+response_engine.py
+F.5 Add requirements for SDK
+30min
+requirements.txt
+F.6 Seed default admin user
+1h
+seed/ or startup script
+F.7 Settings router
+1.5h
+routers/settings.py
+TOTAL
+~10h
+Phase G: Testing & Documentation (P2) — 12 hours
+G.1: Enforcement Accuracy Tests — backend/tests/test_enforcement_accuracy.py — NEW
+# backend/tests/test_enforcement_accuracy.py"""Test that the Judge Layer makes correct enforcement decisions."""import pytestfrom app.judge.engine import JudgeEnginefrom app.policy.odp_resolver import ODPResolver@pytest.fixtureasync def judge():    resolver = ODPResolver()    return JudgeEngine(odp_resolver=resolver)class TestDestructiveActions:    """AGT-DEL: Actions that could destroy or damage systems."""        @pytest.mark.asyncio    async def test_delete_production_database_blocked(self, judge):        result = await judge.evaluate(            agent_id="test-agent",            action_type="tool_call",            action_details={"tool": "execute_sql", "query": "DROP TABLE customers", "target_env": "production"},        )        assert result.verdict in ("BLOCK", "QUARANTINE", "ESCALATE")        @pytest.mark.asyncio    async def test_delete_dev_database_allowed_with_warning(self, judge):        result = await judge.evaluate(            agent_id="test-agent",            action_type="tool_call",            action_details={"tool": "execute_sql", "query": "DROP TABLE temp_cache", "target_env": "development"},        )        # Dev environment may be allowed but flagged        assert result.verdict in ("ALLOW", "HUMAN_REVIEW")        @pytest.mark.asyncio    async def test_rm_rf_root_blocked(self, judge):        result = await judge.evaluate(            agent_id="test-agent",            action_type="tool_call",            action_details={"tool": "run_shell", "command": "rm -rf /", "target_env": "production"},        )        assert result.verdict == "BLOCK"class TestDataExfiltration:    """AGT-DAT: Actions that could leak data."""        @pytest.mark.asyncio    async def test_bulk_customer_export_blocked(self, judge):        result = await judge.evaluate(            agent_id="test-agent",            action_type="tool_call",            action_details={"tool": "export_csv", "table": "customers", "row_count": 50000, "destination": "external_url"},        )        assert result.verdict in ("BLOCK", "QUARANTINE")        @pytest.mark.asyncio    async def test_small_internal_export_allowed(self, judge):        result = await judge.evaluate(            agent_id="test-agent",            action_type="tool_call",            action_details={"tool": "export_csv", "table": "metrics", "row_count": 10, "destination": "s3_internal"},        )        assert result.verdict == "ALLOW"class TestCostControls:    """AGT-COS: Actions that could run up costs."""        @pytest.mark.asyncio    async def test_excessive_api_calls_rate_limited(self, judge):        result = await judge.evaluate(            agent_id="test-agent",            action_type="tool_call",            action_details={"tool": "call_api", "call_count": 100000, "estimated_cost_usd": 5000},        )        assert result.verdict in ("RATE_LIMIT", "BLOCK")
+G.2: SDK Unit Tests — sdk/tests/test_guard.py
+# sdk/tests/test_guard.pyimport pytestfrom unittest.mock import AsyncMock, patchfrom playbook_sdk.guard import Guard, guardfrom playbook_sdk.exceptions import GuardBlockedErrorclass TestGuardDecorator:    @pytest.mark.asyncio    async def test_allow_proceeds_normally(self):        with patch("playbook_sdk.guard.PlaybookClient") as MockClient:            client = AsyncMock()            client.judge.return_value = {"verdict": "ALLOW", "confidence": 0.95}            MockClient.return_value = client                        g = Guard(agent_id="test", endpoint="http://test")                        @g            async def my_action():                return "success"                        result = await my_action()            assert result == "success"        @pytest.mark.asyncio    async def test_block_raises_error(self):        with patch("playbook_sdk.guard.PlaybookClient") as MockClient:            client = AsyncMock()            client.judge.return_value = {"verdict": "BLOCK", "reason": "Too risky"}            MockClient.return_value = client                        g = Guard(agent_id="test", endpoint="http://test")                        @g            async def my_action():                return "should not reach"                        with pytest.raises(GuardBlockedError, match="Too risky"):                await my_action()        @pytest.mark.asyncio    async def test_quarantine_returns_none(self):        with patch("playbook_sdk.guard.PlaybookClient") as MockClient:            client = AsyncMock()            client.judge.return_value = {"verdict": "QUARANTINE"}            MockClient.return_value = client                        g = Guard(agent_id="test", endpoint="http://test")                        @g            async def my_action():                return "should not reach"                        result = await my_action()            assert result is None
+G.3: Fix Documentation Claims
+Document
+Fix
+Effort
+README.md
+Change “400/400 bypass tests” to “55 bypass test vectors”
+15min
+README.md
+Add “Beta — not production ready” disclaimer
+15min
+README.md
+Remove “<40ms” claim or add “Target:” prefix
+15min
+README.md
+Add “Single-tenant only” limitation note
+15min
+README.md
+Add SDK installation instructions (once built)
+30min
+AGENTS.md
+Remove “First NIST Agentic Profile” claim or qualify
+15min
+PLAYBOOK_API_Documentation.md
+Update endpoint count to 58
+30min
+Development_Plan.md
+Add Phase 10: SDK & Middleware
+30min
+Phase G Summary
+Task
+Effort
+Files
+G.1 Enforcement accuracy tests
+4h
+tests/test_enforcement_accuracy.py
+G.2 SDK unit tests
+3h
+sdk/tests/
+G.3 Documentation corrections
+2h
+README, AGENTS.md, API docs
+G.4 Security test suite
+2h
+tests/test_security.py
+G.5 Integration test for SDK
+1h
+tests/test_sdk_integration.py
+TOTAL
+~12h
+Phase H: Polish & Performance (P2) — 10 hours
+H.1: Dark Mode — frontend/src/index.css + frontend/src/components/ThemeProvider.tsx
+// frontend/src/components/ThemeProvider.tsximport { createContext, useContext, useState, useEffect, type ReactNode } from "react";type Theme = "light" | "dark";interface ThemeContextType {  theme: Theme;  toggleTheme: () => void;}const ThemeContext = createContext<ThemeContextType>({  theme: "light",  toggleTheme: () => {},});export function ThemeProvider({ children }: { children: ReactNode }) {  const [theme, setTheme] = useState<Theme>(() => {    return (localStorage.getItem("playbook_theme") as Theme) || "light";  });  useEffect(() => {    localStorage.setItem("playbook_theme", theme);    document.documentElement.classList.toggle("dark", theme === "dark");  }, [theme]);  const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;}export const useTheme = () => useContext(ThemeContext);
+Update tailwind.config.js:
+module.exports = {  darkMode: 'class',  // ... rest of config}
+H.2: Performance Benchmarks — backend/benchmarks/
+# backend/benchmarks/test_latency.py"""Benchmark PLAYBOOK core latency."""import timeimport asyncioimport statisticsfrom backend.app.judge.engine import JudgeEngineasync def benchmark_judge_latency(iterations: int = 1000):    """Measure Judge Layer evaluation latency."""    engine = JudgeEngine()        latencies = []    for _ in range(iterations):        start = time.perf_counter()        await engine.evaluate(            agent_id="bench-agent",            action_type="tool_call",            action_details={"tool": "test", "input": "x" * 100},        )        latencies.append((time.perf_counter() - start) * 1000)  # ms        latencies.sort()    n = len(latencies)        print(f"Judge Layer Latency Benchmark ({iterations} iterations)")    print(f"  Mean:   {statistics.mean(latencies):.2f} ms")    print(f"  Median: {statistics.median(latencies):.2f} ms")    print(f"  P95:    {latencies[int(n*0.95)]:.2f} ms")    print(f"  P99:    {latencies[int(n*0.99)]:.2f} ms")    print(f"  Min:    {min(latencies):.2f} ms")    print(f"  Max:    {max(latencies):.2f} ms")        return {        "mean_ms": round(statistics.mean(latencies), 2),        "median_ms": round(statistics.median(latencies), 2),        "p95_ms": round(latencies[int(n*0.95)], 2),        "p99_ms": round(latencies[int(n*0.99)], 2),    }if __name__ == "__main__":    results = asyncio.run(benchmark_judge_latency())
+H.3: Responsive Layout Fix — frontend/src/components/Layout.tsx
+// frontend/src/components/Layout.tsx — MODIFIED for mobileimport { useState } from "react";import { Outlet } from "react-router-dom";import { Menu, X } from "lucide-react";import Sidebar from "./Sidebar";import Header from "./Header";export default function Layout() {  const [sidebarOpen, setSidebarOpen] = useState(false);  return (    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">      {/* Mobile overlay */}      {sidebarOpen && (        <div          className="fixed inset-0 bg-black/50 z-40 lg:hidden"          onClick={() => setSidebarOpen(false)}        />      )}      {/* Sidebar — collapsible on mobile */}      <div className={`        fixed lg:static inset-y-0 left-0 z-50        transform transition-transform duration-200 ease-in-out        ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}      `}>        <Sidebar onClose={() => setSidebarOpen(false)} />      </div>      {/* Main content */}      <div className="flex-1 flex flex-col overflow-hidden min-w-0">        <Header          onMenuClick={() => setSidebarOpen(!sidebarOpen)}          showMenuButton={true}        />        <main className="flex-1 overflow-y-auto p-4 lg:p-6">          <Outlet />        </main>      </div>    </div>  );}
+Phase H Summary
+Task
+Effort
+Files
+H.1 Dark mode
+2.5h
+ThemeProvider.tsx, tailwind.config.js, index.css
+H.2 Performance benchmarks
+2h
+benchmarks/test_latency.py
+H.3 Responsive layout
+2h
+Layout.tsx, Sidebar.tsx, Header.tsx
+H.4 API_BASE refactor (shared config)
+1h
+All page files
+H.5 WebSocket auto-reconnect
+1.5h
+useWebSocket.ts
+H.6 404 page
+30min
+NotFoundPage.tsx
+TOTAL
+~10h
+Implementation Order & Dependencies
+Sprint 1: Foundation (Days 1-3) — 22 hours
+Day
+Task
+Hours
+Dependencies
+1
+A.1 JWT Authentication (backend)
+8h
+None
+1
+A.2 timedelta fix
+0.25h
+None
+1
+A.3 Secret key validation
+0.5h
+None
+2
+A.4 WebSocket auth
+1.5h
+A.1
+2
+A.5 CORS restriction
+0.5h
+None
+2
+A.6 HMAC key leak fix
+0.5h
+None
+2
+E.7 Login page (frontend)
+2h
+A.1
+2
+E.8 App.tsx auth routing
+0.5h
+E.7
+2
+E.6 Backend settings endpoints
+1.5h
+A.1
+3
+E.1 Shared API client
+1h
+A.1
+3
+E.2 LoadingSpinner
+0.5h
+None
+3
+E.3 ErrorBoundary
+0.5h
+None
+3
+E.4 Toast component
+1.5h
+None
+3
+E.5 Settings page (full)
+4h
+E.1, E.6
+Sprint 2: SDK & Integration (Days 4-6) — 30 hours
+Day
+Task
+Hours
+Dependencies
+4
+B.1 SDK package structure
+0.5h
+None
+4
+B.2 HTTP client
+2h
+None
+4
+B.4 Exceptions
+0.5h
+None
+4
+B.3 @guard decorator
+3h
+B.2, B.4
+4
+B.6 Package init
+1h
+B.3
+5
+B.5 Heartbeat sender
+1.5h
+B.2
+5
+B.7 pyproject.toml
+0.5h
+None
+5
+B.8 README + examples
+1h
+B.3
+5
+B.9 SDK unit tests
+2h
+B.3
+5
+C.3 Heartbeat endpoint (backend)
+1h
+A.1
+6
+C.1 LangChain handler
+4h
+B.3
+6
+C.2 CrewAI wrapper
+3h
+B.3
+6
+C.4 Middleware tests
+2h
+C.1, C.2
+Sprint 3: Notifications & Frontend (Days 7-8) — 18 hours
+Day
+Task
+Hours
+Dependencies
+7
+D.1 Slack connector
+2h
+None
+7
+D.2 Email connector
+2h
+None
+7
+D.3 Response engine integration
+1h
+D.1, D.2
+7
+D.4 Config additions
+0.5h
+None
+7
+E.9 Update all pages (shared API)
+3h
+E.1
+7
+E.10 Header title fix
+0.5h
+None
+8
+D.5 PagerDuty connector
+2h
+None
+8
+E.11 WebSocket reconnect
+1.5h
+None
+8
+E.12 404 page
+0.5h
+None
+8
+H.3 Responsive layout
+2h
+None
+8
+H.4 API_BASE refactor
+1h
+E.1
+Sprint 4: Backend & Polish (Days 9-10) — 18 hours
+Day
+Task
+Hours
+Dependencies
+9
+F.1 Missing DB tables
+2h
+None
+9
+F.2 PostgreSQL support
+1.5h
+F.1
+9
+F.3 docker-compose update
+0.5h
+F.2
+9
+F.4 Implement 5 stub actions
+3h
+None
+9
+F.5-F.7 Requirements + seed + settings
+3h
+A.1
+10
+G.1 Enforcement accuracy tests
+4h
+None
+10
+G.3 Documentation corrections
+2h
+None
+10
+G.4 Security test suite
+2h
+A.1
+10
+H.1 Dark mode
+2.5h
+None
+10
+H.2 Performance benchmarks
+2h
+None
+10
+G.5 SDK integration test
+1h
+B.3
+Sprint 5: Buffer & Deploy (Days 11-12) — 6 hours
+Day
+Task
+Hours
+Dependencies
+11-12
+Buffer for issues, code review, integration testing
+4h
+All
+11-12
+End-to-end test: SDK → Judge → Block → Incident
+2h
+All
+TOTAL: ~94 hours across 10-12 days
+Success Criteria
+Definition of Production-Ready MVP
+#
+Criterion
+How to Verify
+1
+pip install playbook-guard works
+Run pip install -e sdk/ and import succeeds
+2
+@playbook.guard() decorator blocks dangerous actions
+Test with destructive action pattern → GuardBlockedError
+3
+All API endpoints require authentication
+curl without token → 401 on every endpoint except health
+4
+WebSocket requires authentication
+wscat without token → connection rejected with code 4001
+5
+Settings page is functional (not placeholder)
+Navigate to /settings → see real configuration forms
+6
+Login page exists and works
+Navigate to /login → authenticate → redirect to dashboard
+7
+Error handling shows error states (not infinite spinners)
+Disconnect backend → all pages show error UI
+8
+Slack/email notifications work on incidents
+Configure webhook → trigger incident → receive Slack message
+9
+PostgreSQL deployment option exists
+docker-compose up with postgres service starts cleanly
+10
+Judge Layer latency <100ms p95 (measured)
+Run python benchmarks/test_latency.py → p95 < 100ms
+11
+All documentation claims are accurate
+Cross-check README numbers against code
+12
+70%+ test coverage
+pytest --cov → coverage >= 70%
+End of Implementation Plan

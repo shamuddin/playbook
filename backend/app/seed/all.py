@@ -12,6 +12,7 @@ from app.models import (
     BypassPattern,
     ComplianceMapping,
     DetectionRule,
+    GeminiCache,
     IndustryTemplate,
     NistBaseline,
     Playbook,
@@ -20,6 +21,7 @@ from app.models import (
 from app.seed.bypass_patterns import BYPASS_PATTERNS_SEED
 from app.seed.compliance_mappings import COMPLIANCE_MAPPINGS_SEED
 from app.seed.detection_rules import DETECTION_RULES_SEED
+from app.seed.gemini_cache import GEMINI_CACHE_SEED
 from app.seed.industry_templates import INDUSTRY_TEMPLATES_SEED
 from app.seed.nist_baselines import NIST_BASELINES_SEED
 from app.seed.playbooks import PLAYBOOKS_SEED
@@ -200,6 +202,30 @@ async def _seed_industry_templates(db: AsyncSession) -> int:
     return count
 
 
+async def _seed_gemini_cache(db: AsyncSession) -> int:
+    """Seed Gemini cache explanations if none exist."""
+    result = await db.execute(select(GeminiCache).limit(1))
+    if result.scalar_one_or_none() is not None:
+        logger.info("GeminiCache records already exist, skipping seed")
+        return 0
+
+    count = 0
+    for entry_data in GEMINI_CACHE_SEED:
+        entry = GeminiCache(
+            cache_key=entry_data["cache_key"],
+            request_hash=entry_data["request_hash"],
+            response_data=entry_data["response_data"],
+            expires_at=entry_data["expires_at"],
+            hit_count=entry_data["hit_count"],
+        )
+        db.add(entry)
+        count += 1
+
+    await db.flush()
+    logger.info(f"Seeded {count} Gemini cache entries")
+    return count
+
+
 async def seed_all(db: AsyncSession) -> dict[str, int]:
     """Idempotently seed all reference data.
 
@@ -212,6 +238,7 @@ async def seed_all(db: AsyncSession) -> dict[str, int]:
         "nist_baselines": await _seed_nist_baselines(db),
         "compliance_mappings": await _seed_compliance_mappings(db),
         "industry_templates": await _seed_industry_templates(db),
+        "gemini_cache": await _seed_gemini_cache(db),
     }
     await db.commit()
     return results

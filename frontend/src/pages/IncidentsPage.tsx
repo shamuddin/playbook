@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getApiBase, getPageSize } from '../utils/config'
+import { apiFetch } from '../utils/api'
+import { useWebSocket } from '../hooks/useWebSocket'
 
 const API_BASE = getApiBase()
 
@@ -28,12 +30,10 @@ export default function IncidentsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState('')
+  const [livePulse, setLivePulse] = useState(false)
+  const { messages } = useWebSocket()
 
-  useEffect(() => {
-    fetchIncidents()
-  }, [page, statusFilter, severityFilter])
-
-  const fetchIncidents = async () => {
+  const fetchIncidents = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams()
     params.set('page', String(page))
@@ -43,7 +43,8 @@ export default function IncidentsPage() {
     if (search) params.set('q', search)
 
     try {
-      const res = await fetch(`${API_BASE}/incidents?${params.toString()}`)
+      const res = await apiFetch(`${API_BASE}/incidents?${params.toString()}`)
+      if (!res.ok) throw new Error('Unauthorized')
       const data = await res.json()
       setIncidents(data.data || [])
       setTotal(data.total || 0)
@@ -52,7 +53,21 @@ export default function IncidentsPage() {
       setTotal(0)
     }
     setLoading(false)
-  }
+  }, [page, pageSize, statusFilter, severityFilter, search])
+
+  useEffect(() => {
+    fetchIncidents()
+  }, [fetchIncidents])
+
+  useEffect(() => {
+    const latest = messages[0]
+    if (latest && latest.event_type === 'incident_detected') {
+      fetchIncidents()
+      setLivePulse(true)
+      const t = setTimeout(() => setLivePulse(false), 3000)
+      return () => clearTimeout(t)
+    }
+  }, [messages, fetchIncidents])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -86,7 +101,14 @@ export default function IncidentsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Incidents</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Incidents</h1>
+          {livePulse && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 animate-pulse">
+              New incident
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Filters */}

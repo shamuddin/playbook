@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FileText, Shield, AlertTriangle, CheckCircle, BookOpen } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -55,7 +56,8 @@ export default function CompliancePage() {
 
   const loadFrameworks = async () => {
     try {
-      const res = await fetch(`${API_BASE}/compliance/frameworks`)
+      const res = await apiFetch(`${API_BASE}/compliance/frameworks`)
+      if (!res.ok) throw new Error('Unauthorized')
       const data = await res.json()
       const fw = data.data?.frameworks || []
       setFrameworks(fw)
@@ -71,12 +73,11 @@ export default function CompliancePage() {
   const loadMappings = async (framework: string) => {
     try {
       const [mapRes, gapRes] = await Promise.all([
-        fetch(`${API_BASE}/compliance/mapping?framework=${framework}`),
-        fetch(`${API_BASE}/compliance/gap-analysis?framework=${framework}`),
+        apiFetch(`${API_BASE}/compliance/mapping?framework=${framework}`),
+        apiFetch(`${API_BASE}/compliance/gap-analysis?framework=${framework}`),
       ])
-      setMappings(await mapRes.json())
-      const gapData = await gapRes.json()
-      setGapAnalysis(gapData.data || null)
+      if (mapRes.ok) setMappings(await mapRes.json())
+      if (gapRes.ok) setGapAnalysis((await gapRes.json()).data || null)
     } catch {
       setMappings([])
       setGapAnalysis(null)
@@ -115,7 +116,7 @@ export default function CompliancePage() {
             <select
               value={selectedFramework}
               onChange={(e) => setSelectedFramework(e.target.value)}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full min-w-[240px] px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {frameworks.map((fw) => (
                 <option key={fw.name} value={fw.name}>

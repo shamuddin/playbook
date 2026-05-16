@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -61,13 +62,13 @@ export default function JudgePage() {
     setLoading(true)
     try {
       const [statsRes, patternsRes, attemptsRes] = await Promise.all([
-        fetch(`${API_BASE}/judge/stats`),
-        fetch(`${API_BASE}/judge/bypass-patterns`),
-        fetch(`${API_BASE}/judge/bypass-attempts`),
+        apiFetch(`${API_BASE}/judge/stats`),
+        apiFetch(`${API_BASE}/judge/bypass-patterns`),
+        apiFetch(`${API_BASE}/judge/bypass-attempts`),
       ])
-      setStats(await statsRes.json())
-      setPatterns(await patternsRes.json())
-      setAttempts(await attemptsRes.json())
+      if (statsRes.ok) setStats(await statsRes.json())
+      if (patternsRes.ok) setPatterns(await patternsRes.json())
+      if (attemptsRes.ok) setAttempts(await attemptsRes.json())
     } catch {
       // ignore
     }

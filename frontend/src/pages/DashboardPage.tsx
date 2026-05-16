@@ -13,9 +13,11 @@ import {
   Zap,
   Clock,
   FileText,
+  Eye,
 } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { getApiBase, getRefreshInterval } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -65,32 +67,106 @@ interface DashboardData {
       executions_24h: number
     } | null
   }
+  lobstertrap?: {
+    running: boolean
+    recent_events: number
+  }
 }
 
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [ltRunning, setLtRunning] = useState(false)
+  const [ltEvents, setLtEvents] = useState(0)
   const { connected, messages } = useWebSocket()
 
   const fetchDashboard = useCallback(() => {
-    fetch(`${API_BASE}/dashboard`)
-      .then((r) => r.json())
+    apiFetch(`${API_BASE}/dashboard`)
+      .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
-        setData(res.data)
+        if (res?.data) setData(res.data)
         setLoading(false)
       })
       .catch(() => setLoading(false))
   }, [])
 
+  const fetchLtQuickStatus = useCallback(() => {
+    apiFetch(`${API_BASE}/integrations/lobstertrap/status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res) => {
+        if (res?.data) {
+          setLtRunning(res.data.running)
+        }
+      })
+      .catch(() => {})
+    apiFetch(`${API_BASE}/integrations/lobstertrap/logs?limit=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res) => {
+        if (res?.data?.total !== undefined) {
+          setLtEvents(res.data.total)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     fetchDashboard()
+    fetchLtQuickStatus()
     const intervalSeconds = getRefreshInterval()
     if (intervalSeconds > 0) {
-      const id = setInterval(fetchDashboard, intervalSeconds * 1000)
+      const id = setInterval(() => {
+        fetchDashboard()
+        fetchLtQuickStatus()
+      }, intervalSeconds * 1000)
       return () => clearInterval(id)
     }
-  }, [fetchDashboard])
+  }, [fetchDashboard, fetchLtQuickStatus])
+
+  useEffect(() => {
+    if (messages.length === 0) return
+    const msg = messages[0]
+    if (!msg) return
+
+    setData((prev) => {
+      if (!prev) return prev
+      const next: DashboardData = { ...prev }
+
+      // Incident detected
+      if (msg.event_type === 'incident_detected') {
+        next.overview = { ...next.overview, total_incidents: next.overview.total_incidents + 1 }
+        if (msg.severity === 'critical') {
+          next.overview = { ...next.overview, critical_alerts: next.overview.critical_alerts + 1 }
+        }
+        next.incidents = { ...next.incidents, by_severity: { ...next.incidents.by_severity } }
+        const sev = msg.severity || 'unknown'
+        next.incidents.by_severity[sev] = (next.incidents.by_severity[sev] || 0) + 1
+      }
+
+      // Agent status updated — re-fetch dashboard to keep counts accurate
+      if (msg.event_type === 'agent_status_updated') {
+        fetchDashboard()
+      }
+
+      // Judge decision
+      if (msg.event_type === 'judge_decision') {
+        next.judge_layer = { ...next.judge_layer, total_decisions: next.judge_layer.total_decisions + 1 }
+      }
+
+      // Playground incident created
+      if (msg.type === 'playground_event' && msg.event_type === 'incident_created') {
+        next.overview = { ...next.overview, total_incidents: next.overview.total_incidents + 1 }
+        if (msg.severity === 'critical') {
+          next.overview = { ...next.overview, critical_alerts: next.overview.critical_alerts + 1 }
+        }
+        next.incidents = { ...next.incidents, by_severity: { ...next.incidents.by_severity } }
+        const sev = msg.severity || 'unknown'
+        next.incidents.by_severity[sev] = (next.incidents.by_severity[sev] || 0) + 1
+      }
+
+      return next
+    })
+  }, [messages])
 
   if (loading) {
     return (
@@ -270,6 +346,23 @@ export default function DashboardPage() {
             <span className="ml-auto px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
               Operational
             </span>
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Eye className="w-4 h-4 text-blue-500" />
+            Lobster Trap DPI
+          </h3>
+          <div className="flex items-center gap-3 mb-3">
+            <div className={`w-3 h-3 rounded-full ${ltRunning ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-sm text-gray-700">
+              {ltRunning ? 'Proxy Running' : 'Proxy Stopped'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500">Recent DPI events</span>
+            <span className="text-sm font-medium text-gray-900">{ltEvents}</span>
           </div>
         </div>
       </div>

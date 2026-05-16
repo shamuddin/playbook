@@ -23,7 +23,7 @@ class Base(DeclarativeBase):
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def generate_uuid() -> str:
@@ -668,3 +668,85 @@ def audit_incident_update(mapper, connection, target):
                 details=changes,
             )
         )
+
+
+# ============================================================================
+# PLAYGROUND (Agent Simulator)
+# ============================================================================
+
+class PlaygroundSessionStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+class PlaygroundSession(Base):
+    __tablename__ = "playground_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[PlaygroundSessionStatus] = mapped_column(
+        Enum(PlaygroundSessionStatus), default=PlaygroundSessionStatus.PENDING
+    )
+    provider_name: Mapped[str] = mapped_column(String(50), nullable=False, default="openai")
+    provider_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    industry_template: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    agents: Mapped[list["PlaygroundAgent"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    events: Mapped[list["PlaygroundEvent"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class PlaygroundAgent(Base):
+    __tablename__ = "playground_agents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("playground_sessions.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    role: Mapped[str] = mapped_column(String(100), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(20), default="medium")
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    actions: Mapped[dict] = mapped_column(JSON, default=list)
+    situations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+    session: Mapped["PlaygroundSession"] = relationship(back_populates="agents")
+
+
+class PlaygroundEventType(str, enum.Enum):
+    AGENT_THOUGHT = "agent_thought"
+    LLM_RESPONSE = "llm_response"
+    ACTION_REQUESTED = "action_requested"
+    JUDGE_VERDICT = "judge_verdict"
+    INCIDENT_CREATED = "incident_created"
+    HUMAN_APPROVAL_REQUESTED = "human_approval_requested"
+    MISMATCH_DETECTED = "mismatch_detected"
+    HANDOFF = "handoff"
+    HEARTBEAT = "heartbeat"
+    SYSTEM = "system"
+    ERROR = "error"
+
+
+class PlaygroundEvent(Base):
+    __tablename__ = "playground_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("playground_sessions.id"), nullable=False)
+    agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    agent_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    event_type: Mapped[PlaygroundEventType] = mapped_column(Enum(PlaygroundEventType), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+    session: Mapped["PlaygroundSession"] = relationship(back_populates="events")

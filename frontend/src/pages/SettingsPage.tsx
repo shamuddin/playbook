@@ -15,9 +15,12 @@ import {
   Globe,
   Wifi,
   Database,
+  Shield,
+  ExternalLink,
 } from 'lucide-react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { getApiBase } from '../utils/config'
+import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
@@ -46,6 +49,15 @@ interface TestResult {
   timestamp: number
 }
 
+interface LobsterTrapStatus {
+  running: boolean
+  pid?: number
+  port?: number
+  policy?: string
+  audit_log?: string
+  error?: string
+}
+
 export default function SettingsPage() {
   // ------------------------------------------------------------------
   // System info
@@ -56,20 +68,47 @@ export default function SettingsPage() {
 
   const fetchHealth = useCallback(() => {
     setLoadingHealth(true)
-    fetch(`${API_BASE}/health`)
-      .then((r) => r.json())
+    apiFetch(`${API_BASE}/health`)
+      .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
-        setHealth(res)
+        if (res) setHealth(res)
         setLoadingHealth(false)
       })
       .catch(() => setLoadingHealth(false))
   }, [])
 
   const fetchPublicSettings = useCallback(() => {
-    fetch(`${API_BASE}/settings/public`)
-      .then((r) => r.json())
+    apiFetch(`${API_BASE}/settings/public`)
+      .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
-        if (res.success) setPublicSettings(res.data)
+        if (res?.success) setPublicSettings(res.data)
+      })
+      .catch(() => {})
+  }, [])
+
+  // ------------------------------------------------------------------
+  // Lobster Trap status
+  // ------------------------------------------------------------------
+  const [ltStatus, setLtStatus] = useState<LobsterTrapStatus | null>(null)
+  const [ltLoading, setLtLoading] = useState(true)
+  const [ltEventCount, setLtEventCount] = useState(0)
+
+  const fetchLtStatus = useCallback(() => {
+    setLtLoading(true)
+    apiFetch(`${API_BASE}/integrations/lobstertrap/status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res) => {
+        if (res?.data) setLtStatus(res.data)
+        setLtLoading(false)
+      })
+      .catch(() => setLtLoading(false))
+  }, [])
+
+  const fetchLtLogs = useCallback(() => {
+    apiFetch(`${API_BASE}/integrations/lobstertrap/logs?limit=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res) => {
+        if (res?.data?.total !== undefined) setLtEventCount(res.data.total)
       })
       .catch(() => {})
   }, [])
@@ -77,9 +116,15 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchHealth()
     fetchPublicSettings()
-    const interval = setInterval(fetchHealth, 30000)
+    fetchLtStatus()
+    fetchLtLogs()
+    const interval = setInterval(() => {
+      fetchHealth()
+      fetchLtStatus()
+      fetchLtLogs()
+    }, 30000)
     return () => clearInterval(interval)
-  }, [fetchHealth, fetchPublicSettings])
+  }, [fetchHealth, fetchPublicSettings, fetchLtStatus, fetchLtLogs])
 
   // ------------------------------------------------------------------
   // Notification tests
@@ -90,7 +135,7 @@ export default function SettingsPage() {
   const testNotification = useCallback(async (channel: string) => {
     setTestingChannel(channel)
     try {
-      const res = await fetch(`${API_BASE}/integrations/notifications/test`, {
+      const res = await apiFetch(`${API_BASE}/integrations/notifications/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -100,6 +145,7 @@ export default function SettingsPage() {
           incident_id: 'TEST-001',
         }),
       })
+      if (!res.ok) throw new Error('Test failed')
       const data = await res.json()
       const success = data.success && data.data?.success
       const detail = data.data?.detail || data.message || 'No detail'
@@ -212,6 +258,82 @@ export default function SettingsPage() {
           </div>
         ) : (
           <p className="text-sm text-red-600">Unable to reach health endpoint.</p>
+        )}
+      </section>
+
+      {/* -------------------------------------------------------------- */}
+      {/* Lobster Trap Integration                                       */}
+      {/* -------------------------------------------------------------- */}
+      <section className="card">
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5 text-blue-600" />
+          <h2 className="text-lg font-semibold text-gray-900">Lobster Trap DPI</h2>
+          <button
+            onClick={() => {
+              fetchLtStatus()
+              fetchLtLogs()
+            }}
+            className="ml-auto p-1.5 text-gray-400 hover:text-blue-600 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${ltLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        {ltLoading && !ltStatus ? (
+          <div className="flex items-center justify-center h-24">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+          </div>
+        ) : ltStatus ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Status</p>
+              <div className="mt-1">
+                {ltStatus.running ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+                    <CheckCircle className="w-3 h-3" /> Running
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 px-2 py-0.5 rounded-full">
+                    <XCircle className="w-3 h-3" /> Stopped
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Policy</p>
+              <p className="mt-1 text-sm font-medium text-gray-900 truncate">
+                {ltStatus.policy ? ltStatus.policy.split('/').pop() : 'Unknown'}
+              </p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Recent Events</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{ltEventCount}</p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Port</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{ltStatus.port ?? '-'}</p>
+            </div>
+            {ltStatus.error && (
+              <div className="sm:col-span-2 lg:col-span-4 bg-red-50 rounded-lg p-4">
+                <p className="text-xs text-red-500 uppercase tracking-wide">Error</p>
+                <p className="mt-1 text-sm text-red-700">{ltStatus.error}</p>
+              </div>
+            )}
+            <div className="sm:col-span-2 lg:col-span-4">
+              <a
+                href={`${API_BASE}/integrations/lobstertrap/status`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+              >
+                <ExternalLink className="w-3 h-3" />
+                View API status endpoint
+              </a>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">Unable to retrieve Lobster Trap status.</p>
         )}
       </section>
 

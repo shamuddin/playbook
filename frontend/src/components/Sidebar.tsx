@@ -11,6 +11,7 @@ import {
   Sliders,
   BarChart3,
   X,
+  Gamepad2,
 } from 'lucide-react'
 
 const navItems = [
@@ -18,6 +19,7 @@ const navItems = [
   { path: '/incidents', label: 'Incidents', icon: AlertTriangle },
   { path: '/judge', label: 'Judge Layer', icon: Gavel },
   { path: '/agents', label: 'Agent Health', icon: Activity },
+  { path: '/playground', label: 'Playground', icon: Gamepad2 },
   { path: '/compliance', label: 'Compliance', icon: FileText },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/policy-builder', label: 'Policy Builder', icon: Sliders },

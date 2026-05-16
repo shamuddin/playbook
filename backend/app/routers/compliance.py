@@ -13,6 +13,13 @@ from app.schemas import ComplianceMappingResponse, ComplianceReportResponse, Sta
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
+FRAMEWORK_META = {
+    "eu_ai_act": {"display_name": "EU AI Act", "version": "2024/1689"},
+    "nist_ai_rmf": {"display_name": "NIST AI RMF", "version": "1.0"},
+    "hipaa": {"display_name": "HIPAA", "version": "45 CFR 164"},
+    "soc2": {"display_name": "SOC 2 Type II", "version": "2017"},
+}
+
 
 @router.get("/report", response_model=ComplianceReportResponse)
 async def get_compliance_report(
@@ -318,15 +325,22 @@ async def list_frameworks(
     result = await db.execute(
         select(ComplianceMapping.framework).distinct()
     )
-    frameworks = [row[0] for row in result.all()]
+    frameworks = [
+        {
+            "name": row[0],
+            "display_name": FRAMEWORK_META.get(row[0], {}).get("display_name", row[0].replace("_", " ").title()),
+            "version": FRAMEWORK_META.get(row[0], {}).get("version", ""),
+        }
+        for row in result.all()
+    ]
 
     framework_stats = {}
     for fw in frameworks:
         count_result = await db.execute(
-            select(ComplianceMapping).where(ComplianceMapping.framework == fw)
+            select(ComplianceMapping).where(ComplianceMapping.framework == fw["name"])
         )
         count = len(count_result.scalars().all())
-        framework_stats[fw] = count
+        framework_stats[fw["name"]] = count
 
     return StandardResponse(
         data={
