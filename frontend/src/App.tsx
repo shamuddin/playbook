@@ -14,6 +14,7 @@ import ForensicsPage from './pages/ForensicsPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import PlaygroundPage from './pages/PlaygroundPage'
 import AgentSwarmPage from './pages/AgentSwarmPage'
+import DpiLiveFeedPage from './pages/DpiLiveFeedPage'
 import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
 
@@ -58,6 +59,7 @@ function AppRoutes() {
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="playground" element={<PlaygroundPage />} />
         <Route path="swarm" element={<AgentSwarmPage />} />
+        <Route path="dpi-live" element={<DpiLiveFeedPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

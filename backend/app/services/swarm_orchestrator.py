@@ -70,12 +70,14 @@ class SwarmOrchestrator:
         gcp_region: str = "global",
         model: str = "gemini-3.1-flash-lite",
         api_key: str = "",
+        misbehavior_mode: bool = False,
     ):
         self.session_id = session_id
         self.gcp_project_id = gcp_project_id
         self.gcp_region = gcp_region
         self.model = model
         self.api_key = api_key
+        self.misbehavior_mode = misbehavior_mode
         self.running = False
         self._tasks: List[asyncio.Task] = []
         self._events: List[SwarmEvent] = []
@@ -360,6 +362,9 @@ class SwarmOrchestrator:
         if hasattr(self, "_tasks_config"):
             task_groups: Dict[str, List[SwarmTask]] = {}
             for t in self._tasks_config:
+                # In misbehavior mode, only run malicious (DENY) tasks
+                if self.misbehavior_mode and t.get("expect_verdict") != "DENY":
+                    continue
                 aid = t.get("agent_id", "fx-trader")
                 if aid not in task_groups:
                     task_groups[aid] = []
@@ -564,6 +569,7 @@ class SwarmOrchestrator:
             "allowed": allowed,
             "blocked": blocked,
             "agent_count": len(self._agents),
+            "misbehavior_mode": self.misbehavior_mode,
         }
 
 

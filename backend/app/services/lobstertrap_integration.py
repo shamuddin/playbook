@@ -435,3 +435,67 @@ async def get_recent_logs(limit: int = 50) -> list:
             pass
 
     return entries
+
+
+def get_lobstertrap_stats() -> dict:
+    """Calculate aggregate stats from the Lobster Trap audit log."""
+    path = _audit_log_path()
+    if not path.exists():
+        return {
+            "total_intercepted": 0,
+            "blocked": 0,
+            "allowed": 0,
+            "quarantined": 0,
+            "top_rules": [],
+            "avg_risk_score": 0.0,
+        }
+
+    total = 0
+    blocked = 0
+    allowed = 0
+    quarantined = 0
+    rule_counts: dict[str, int] = {}
+    risk_scores: list[float] = []
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                total += 1
+                action = (entry.get("action") or "").upper()
+                if action == "BLOCK":
+                    blocked += 1
+                elif action == "ALLOW":
+                    allowed += 1
+                elif action == "QUARANTINE":
+                    quarantined += 1
+
+                rule = entry.get("matched_rule") or "unknown"
+                rule_counts[rule] = rule_counts.get(rule, 0) + 1
+
+                meta = entry.get("metadata", {})
+                if isinstance(meta, dict):
+                    score = meta.get("risk_score", 0.0)
+                    if isinstance(score, (int, float)):
+                        risk_scores.append(float(score))
+    except Exception:
+        pass
+
+    top_rules = sorted(rule_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    avg_risk = sum(risk_scores) / len(risk_scores) if risk_scores else 0.0
+
+    return {
+        "total_intercepted": total,
+        "blocked": blocked,
+        "allowed": allowed,
+        "quarantined": quarantined,
+        "top_rules": [{"rule": r, "count": c} for r, c in top_rules],
+        "avg_risk_score": round(avg_risk, 2),
+    }

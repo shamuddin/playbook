@@ -24,6 +24,9 @@ import {
   Terminal,
   Eye,
   EyeOff,
+  Flame,
+  Skull,
+  Target,
 } from 'lucide-react'
 
 interface Scenario {
@@ -130,6 +133,8 @@ export default function AgentSwarmPage() {
   const [error, setError] = useState('')
   const [showEventFeed, setShowEventFeed] = useState(true)
   const [backendConnected, setBackendConnected] = useState(false)
+  const [misbehaviorMode, setMisbehaviorMode] = useState(false)
+  const [pulseIndex, setPulseIndex] = useState<number | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -208,9 +213,17 @@ export default function AgentSwarmPage() {
     }
   }, [])
 
-  // Auto-scroll events
+  // Auto-scroll events and pulse new incidents
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (events.length > 0) {
+      const latest = events[events.length - 1]
+      if (latest.event_type === 'Incident Created') {
+        setPulseIndex(events.length - 1)
+        const timer = setTimeout(() => setPulseIndex(null), 2500)
+        return () => clearTimeout(timer)
+      }
+    }
   }, [events])
 
   // Poll status while running
@@ -291,6 +304,7 @@ export default function AgentSwarmPage() {
           gcp_project_id: gcpProjectId || undefined,
           gcp_region: gcpRegion || undefined,
           model: selectedModel,
+          misbehavior_mode: misbehaviorMode,
         }),
       })
 
@@ -374,10 +388,35 @@ export default function AgentSwarmPage() {
 
       {/* Scenario Selection */}
       <div className="card p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Terminal className="w-5 h-5 text-blue-600" />
-          Select Scenario
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <Terminal className="w-5 h-5 text-blue-600" />
+            Select Scenario
+          </h2>
+          {/* Misbehavior Mode Toggle */}
+          <button
+            onClick={() => setMisbehaviorMode(!misbehaviorMode)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              misbehaviorMode
+                ? 'bg-red-600 text-white shadow-lg shadow-red-500/30 animate-pulse'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <Flame className={`w-4 h-4 ${misbehaviorMode ? 'animate-bounce' : ''}`} />
+            {misbehaviorMode ? 'Misbehavior Mode ON' : 'Misbehavior Mode'}
+          </button>
+        </div>
+
+        {misbehaviorMode && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-700">
+              <span className="font-semibold">Warning:</span> Agents will attempt malicious actions only.
+              All tasks become attacks — expect 100% block rate.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {scenarios.map((s) => (
             <button
@@ -385,7 +424,11 @@ export default function AgentSwarmPage() {
               onClick={() => setSelectedScenario(s.id)}
               className={`p-4 rounded-xl border-2 text-left transition-all ${
                 selectedScenario === s.id
-                  ? 'border-blue-500 bg-blue-50'
+                  ? misbehaviorMode
+                    ? 'border-red-500 bg-red-50 shadow-md shadow-red-500/20'
+                    : 'border-blue-500 bg-blue-50'
+                  : misbehaviorMode
+                  ? 'border-gray-200 hover:border-red-300'
                   : 'border-gray-200 hover:border-blue-300'
               }`}
             >
@@ -398,7 +441,7 @@ export default function AgentSwarmPage() {
                 <span className="flex items-center gap-1">
                   <Activity className="w-3 h-3" /> {s.tasks}
                 </span>
-                <span className="px-1.5 py-0.5 rounded bg-gray-100 text-[10px]">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] ${misbehaviorMode ? 'bg-red-100 text-red-700' : 'bg-gray-100'}`}>
                   {s.incident_type}
                 </span>
               </div>
@@ -560,15 +603,23 @@ export default function AgentSwarmPage() {
               <button
                 onClick={launchSwarm}
                 disabled={loading || !backendConnected}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  misbehaviorMode
+                    ? 'bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 shadow-lg shadow-red-500/40 animate-pulse'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                {loading ? 'Launching...' : 'Launch Swarm'}
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : misbehaviorMode ? <Skull className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {loading ? 'Launching...' : misbehaviorMode ? 'Launch Swarm Attack' : 'Launch Swarm'}
               </button>
             ) : (
               <button
                 onClick={stopSwarm}
-                className="flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
+                className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white transition-all ${
+                  misbehaviorMode
+                    ? 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-500/30'
+                    : 'bg-red-600 hover:bg-red-700'
+                }`}
               >
                 <Square className="w-4 h-4" />
                 Stop Swarm
@@ -601,35 +652,68 @@ export default function AgentSwarmPage() {
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Activity className="w-5 h-5 text-blue-600" />
-            Status
+            Live Stats
           </h2>
 
           {status ? (
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Running</span>
-                <span className={status.running ? 'text-green-600 font-medium' : 'text-gray-600'}>
-                  {status.running ? 'Yes' : 'No'}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Agents</span>
-                <span className="font-medium text-gray-900">{status.agent_count}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Allowed</span>
-                <span className="text-green-600 font-medium">{status.allowed}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Blocked</span>
-                <span className="text-red-600 font-medium">{status.blocked}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Total Events</span>
-                <span className="font-medium text-gray-900">{status.total_events}</span>
+            <div className="space-y-4">
+              {/* Stat Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-blue-50 rounded-lg p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-blue-600 mb-1">
+                    <Bot className="w-4 h-4" />
+                    <span className="text-xs font-semibold">Agents</span>
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">{status.agent_count}</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-gray-600 mb-1">
+                    <Zap className="w-4 h-4" />
+                    <span className="text-xs font-semibold">Events</span>
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">{status.total_events}</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-green-600 mb-1">
+                    <ShieldCheck className="w-4 h-4" />
+                    <span className="text-xs font-semibold">Allowed</span>
+                  </div>
+                  <div className="text-2xl font-bold text-green-700">{status.allowed}</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 text-center">
+                  <div className="flex items-center justify-center gap-1 text-red-600 mb-1">
+                    <ShieldAlert className="w-4 h-4" />
+                    <span className="text-xs font-semibold">Blocked</span>
+                  </div>
+                  <div className="text-2xl font-bold text-red-700">{status.blocked}</div>
+                </div>
               </div>
 
-              <div className="mt-4 pt-4 border-t border-gray-100">
+              {/* Incidents Counter */}
+              <div className={`rounded-lg p-3 flex items-center justify-between ${
+                events.filter((e) => e.event_type === 'Incident Created').length > 0
+                  ? 'bg-orange-50 border border-orange-200'
+                  : 'bg-gray-50'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <Target className={`w-5 h-5 ${
+                    events.filter((e) => e.event_type === 'Incident Created').length > 0
+                      ? 'text-orange-600'
+                      : 'text-gray-400'
+                  }`} />
+                  <span className="text-sm font-medium text-gray-700">Incidents Generated</span>
+                </div>
+                <span className={`text-xl font-bold ${
+                  events.filter((e) => e.event_type === 'Incident Created').length > 0
+                    ? 'text-orange-700'
+                    : 'text-gray-400'
+                }`}>
+                  {events.filter((e) => e.event_type === 'Incident Created').length}
+                </span>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="pt-2">
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-green-500 transition-all"
@@ -699,7 +783,9 @@ export default function AgentSwarmPage() {
                 {events.map((e, i) => (
                   <div
                     key={i}
-                    className={`flex items-start gap-2 p-2 rounded ${getVerdictColor(e.verdict, e.event_type)}`}
+                    className={`flex items-start gap-2 p-2 rounded transition-all duration-500 ${getVerdictColor(e.verdict, e.event_type)} ${
+                      pulseIndex === i ? 'ring-2 ring-yellow-400 shadow-lg shadow-yellow-500/20 scale-[1.02]' : ''
+                    }`}
                   >
                     <div className="mt-0.5">{getVerdictIcon(e.verdict, e.event_type)}</div>
                     <div className="flex-1 min-w-0">

@@ -40,6 +40,7 @@ async def run_swarm(
     gcp_project_id = payload.get("gcp_project_id")
     gcp_region = payload.get("gcp_region", "global")
     model = payload.get("model", "gemini-3.1-flash-lite")
+    misbehavior_mode = payload.get("misbehavior_mode", False)
     api_key = credentials.credentials if credentials else ""
 
     # Generate session ID
@@ -53,6 +54,7 @@ async def run_swarm(
         gcp_region=gcp_region,
         model=model,
         api_key=api_key,
+        misbehavior_mode=misbehavior_mode,
     )
     await swarm.setup_agents(scenario_id)
 
@@ -71,6 +73,7 @@ async def run_swarm(
             "scenario_id": scenario_id,
             "status": "running",
             "agent_count": len(swarm._agents),
+            "misbehavior_mode": misbehavior_mode,
         },
         message=f"Swarm '{scenario_id}' started with {len(swarm._agents)} agents",
     )

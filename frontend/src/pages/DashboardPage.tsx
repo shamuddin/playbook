@@ -15,6 +15,7 @@ import {
   FileText,
   Eye,
   Swords,
+  ChevronRight,
 } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { getApiBase, getRefreshInterval } from '../utils/config'
@@ -407,21 +408,31 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="card">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+        <div className="card border-l-4 border-blue-500">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
             <Eye className="w-4 h-4 text-blue-500" />
             Lobster Trap DPI
+            <span className="ml-auto px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full font-medium">
+              Powered by Veea
+            </span>
           </h3>
           <div className="flex items-center gap-3 mb-3">
-            <div className={`w-3 h-3 rounded-full ${ltRunning ? 'bg-green-500' : 'bg-red-500'}`} />
+            <div className={`w-3 h-3 rounded-full ${ltRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
             <span className="text-sm text-gray-700">
               {ltRunning ? 'Proxy Running' : 'Proxy Stopped'}
             </span>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-gray-500">Recent DPI events</span>
             <span className="text-sm font-medium text-gray-900">{ltEvents}</span>
           </div>
+          <button
+            onClick={() => navigate('/dpi-live')}
+            className="w-full mt-1 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+          >
+            View DPI Live Feed
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       </div>
 

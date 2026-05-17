@@ -10,6 +10,7 @@ from app.services.lobstertrap_integration import (
     get_lobstertrap_status,
     get_recent_logs,
     run_lobstertrap_test,
+    get_lobstertrap_stats,
 )
 
 router = APIRouter(prefix="/integrations/lobstertrap", tags=["lobstertrap"])
@@ -55,4 +56,16 @@ async def lobstertrap_logs(
     return StandardResponse(
         data={"entries": entries, "total": len(entries)},
         message=f"Retrieved {len(entries)} Lobster Trap audit entries",
+    )
+
+
+@router.get("/stats", response_model=StandardResponse)
+async def lobstertrap_stats(
+    _=Depends(get_current_user),
+) -> StandardResponse:
+    """Return aggregate statistics from the Lobster Trap audit log."""
+    stats = get_lobstertrap_stats()
+    return StandardResponse(
+        data=stats,
+        message="Lobster Trap statistics retrieved",
     )

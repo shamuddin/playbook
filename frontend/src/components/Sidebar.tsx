@@ -12,11 +12,13 @@ import {
   BarChart3,
   X,
   Gamepad2,
+  Eye,
 } from 'lucide-react'
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/incidents', label: 'Incidents', icon: AlertTriangle },
+  { path: '/dpi-live', label: 'DPI Live Feed', icon: Eye },
   { path: '/judge', label: 'Judge Layer', icon: Gavel },
   { path: '/agents', label: 'Agent Health', icon: Activity },
   { path: '/swarm', label: 'Simulator', icon: Gamepad2, external: true },
