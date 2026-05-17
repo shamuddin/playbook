@@ -6,6 +6,7 @@ against the PLAYBOOK Judge Layer with real-time event streaming.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -189,7 +190,7 @@ async def create_session(
             ]
         }
     """
-    provider_name = payload.get("provider_name", "openai")
+    provider_name = payload.get("provider_name") or payload.get("provider", "openai")
     provider_config = payload.get("provider_config", {})
     is_valid, error = await _validate_provider_config(provider_name, provider_config)
     if not is_valid:
@@ -198,8 +199,8 @@ async def create_session(
     session = PlaygroundSession(
         name=payload.get("name", "Untitled Session"),
         description=payload.get("description"),
-        provider_name=payload.get("provider_name", "openai"),
-        provider_config=payload.get("provider_config", {}),
+        provider_name=provider_name,
+        provider_config=provider_config,
         industry_template=payload.get("industry_template"),
         status=PlaygroundSessionStatus.PENDING,
     )
@@ -368,9 +369,14 @@ async def get_session_events(
 @router.post("/sessions/{session_id}/start", response_model=StandardResponse)
 async def start_session(
     session_id: str,
+    payload: dict = {},
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse:
-    """Start the simulation for a session."""
+    """Start the simulation for a session.
+
+    Pass {"misbehavior_mode": true} to force agents toward malicious actions
+    for demonstration and stress-testing purposes.
+    """
     result = await db.execute(select(PlaygroundSession).where(PlaygroundSession.id == session_id))
     session = result.scalar_one_or_none()
     if not session:
@@ -386,7 +392,8 @@ async def start_session(
         remove_engine(session_id)
 
     # Create and start new engine
-    engine = PlaygroundEngine(session_id)
+    misbehavior_mode = payload.get("misbehavior_mode", False) if payload else False
+    engine = PlaygroundEngine(session_id, misbehavior_mode=misbehavior_mode)
     await engine.load_from_db(db)
     set_engine(session_id, engine)
 
@@ -396,11 +403,13 @@ async def start_session(
     await db.commit()
 
     # Start engine in background
-    import asyncio
-    asyncio.create_task(engine.start())
+    task = asyncio.create_task(engine.start())
+    task.add_done_callback(
+        lambda t: print(f"[playground] Engine start completed: {t.exception()}") if t.done() and t.exception() else None
+    )
 
     return StandardResponse(
-        data={"session_id": session_id, "status": "running", "agent_count": len(engine.agents)},
+        data={"session_id": session_id, "status": "running", "agent_count": len(engine.agents), "misbehavior_mode": misbehavior_mode},
         message="Simulation started",
     )
 
@@ -470,7 +479,7 @@ async def create_from_template(
             "provider_config": {"api_key": "sk-...", "model": "gpt-4o-mini"}
         }
     """
-    provider_name = payload.get("provider_name", "openai")
+    provider_name = payload.get("provider_name") or payload.get("provider", "openai")
     provider_config = payload.get("provider_config", {})
     is_valid, error = await _validate_provider_config(provider_name, provider_config)
     if not is_valid:
@@ -484,8 +493,8 @@ async def create_from_template(
     session = PlaygroundSession(
         name=tpl["name"],
         description=tpl["description"],
-        provider_name=payload.get("provider_name", "openai"),
-        provider_config=payload.get("provider_config", {}),
+        provider_name=provider_name,
+        provider_config=provider_config,
         industry_template=template_id,
         status=PlaygroundSessionStatus.PENDING,
     )

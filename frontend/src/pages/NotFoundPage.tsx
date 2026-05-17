@@ -3,15 +3,15 @@ import { Home, AlertCircle } from 'lucide-react'
 
 export default function NotFoundPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
       <div className="text-center max-w-md">
         <div className="flex justify-center mb-6">
-          <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
-            <AlertCircle className="w-10 h-10 text-red-600 dark:text-red-400" />
+          <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center">
+            <AlertCircle className="w-10 h-10 text-red-600" />
           </div>
         </div>
-        <h1 className="text-6xl font-bold text-gray-900 dark:text-gray-100 mb-2">404</h1>
-        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+        <h1 className="text-6xl font-bold text-gray-900 mb-2">404</h1>
+        <p className="text-xl text-gray-600 mb-8">
           Page not found. The resource you are looking for does not exist.
         </p>
         <Link

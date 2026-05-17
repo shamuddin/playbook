@@ -38,13 +38,13 @@ async def incidents_websocket(websocket: WebSocket):
 
             if action == "subscribe":
                 filters = data.get("filters", {})
-                ws_manager.set_filter(websocket, filters)
+                await ws_manager.set_filter(websocket, filters)
                 await websocket.send_json({
                     "event_type": "subscribed",
                     "filters": filters,
                 })
             elif action == "unsubscribe":
-                ws_manager.set_filter(websocket, {})
+                await ws_manager.set_filter(websocket, {})
                 await websocket.send_json({
                     "event_type": "unsubscribed",
                 })
@@ -57,4 +57,4 @@ async def incidents_websocket(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)

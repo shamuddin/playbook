@@ -9,6 +9,8 @@ import {
   Lock,
   Clock,
   Fingerprint,
+  Info,
+  AlertTriangle,
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
@@ -110,6 +112,23 @@ export default function ForensicsPage() {
         </div>
       </div>
 
+      {/* Info Banner */}
+      <div className="card p-4 bg-blue-50 border-l-4 border-blue-500">
+        <div className="flex items-start gap-3">
+          <Info className="w-5 h-5 text-blue-600 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-blue-900">
+              This is a tamper-evident evidence package.
+            </p>
+            <p className="text-xs text-blue-800 mt-1">
+              Every component — raw packet, detection result, judge decision, response record, and agent snapshot —
+              is hashed with SHA-256. If a single byte changes, the integrity hash becomes invalid.
+              Regulators can verify this package independently.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Package Header */}
       <div className="card p-6 border-l-4 border-blue-500">
         <div className="flex items-start justify-between">
@@ -201,16 +220,33 @@ export default function ForensicsPage() {
           Artifacts
         </h2>
         {pkg.artifacts && pkg.artifacts.length > 0 ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="space-y-2">
             {pkg.artifacts.map((a, i) => (
-              <div key={i} className="bg-gray-50 p-3 rounded-lg text-center">
-                <FileText className="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                <span className="text-xs text-gray-700 font-medium">{a}</span>
+              <div key={i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{a}</p>
+                  <p className="text-xs text-gray-500">
+                    {a.includes('packet') ? 'Raw Layer-7 packet capture from Lobster Trap proxy' :
+                     a.includes('detect') ? 'Detection engine output with matched rules and confidence scores' :
+                     a.includes('judge') ? 'Deterministic judge decision with rationale and latency' :
+                     a.includes('response') ? 'Enforcement steps executed by the response engine' :
+                     a.includes('agent') ? 'Agent health snapshot at time of incident' :
+                     a.includes('audit') ? 'Full audit trail with user/timestamp records' :
+                     'Forensic artifact collected automatically'}
+                  </p>
+                </div>
+                <span className="text-xs font-mono text-gray-400 flex-shrink-0">SHA-256</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-gray-500">No artifacts recorded</p>
+          <div className="p-4 bg-gray-50 rounded-lg text-center">
+            <AlertTriangle className="w-6 h-6 text-yellow-500 mx-auto mb-2" />
+            <p className="text-sm text-gray-500">No artifacts recorded yet. Evidence is assembled automatically when an incident is created.</p>
+          </div>
         )}
       </div>
 

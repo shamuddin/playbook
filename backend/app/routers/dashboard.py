@@ -29,7 +29,7 @@ from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-_IS_POSTGRES = get_settings().database_url.startswith("postgresql")
+_IS_POSTGRES = get_settings().database_url.startswith(("postgresql", "postgres"))
 
 
 def _parse_period(period: str) -> datetime:
@@ -205,10 +205,12 @@ async def get_dashboard(
                 "executions_24h": most_used_row[1],
             }
 
-    # Top bypass pattern
+    # Top bypass pattern (join with BypassPattern to get human-readable name)
+    from app.models import BypassPattern
     top_bypass_result = await db.execute(
-        select(BypassAttempt.pattern_id, func.count(BypassAttempt.id))
-        .group_by(BypassAttempt.pattern_id)
+        select(BypassPattern.pattern_name, func.count(BypassAttempt.id))
+        .join(BypassPattern, BypassAttempt.pattern_id == BypassPattern.id)
+        .group_by(BypassPattern.pattern_name)
         .order_by(func.count(BypassAttempt.id).desc())
         .limit(1)
     )
@@ -436,6 +438,28 @@ async def get_analytics_summary(
         "poor": await db.scalar(select(func.count(Agent.id)).where(Agent.health_score < 50)),
     }
 
+    # Agent breakdown (incidents by agent)
+    agent_result = await db.execute(
+        select(Incident.agent_id, func.count(Incident.id))
+        .where(Incident.created_at >= cutoff)
+        .where(Incident.agent_id != None)
+        .group_by(Incident.agent_id)
+        .order_by(func.count(Incident.id).desc())
+        .limit(10)
+    )
+    agent_breakdown = {row[0]: row[1] for row in agent_result.all()}
+
+    # Swarm breakdown (incidents by swarm)
+    swarm_result = await db.execute(
+        select(Incident.swarm_id, func.count(Incident.id))
+        .where(Incident.created_at >= cutoff)
+        .where(Incident.swarm_id != None)
+        .group_by(Incident.swarm_id)
+        .order_by(func.count(Incident.id).desc())
+        .limit(10)
+    )
+    swarm_breakdown = {row[0]: row[1] for row in swarm_result.all()}
+
     return StandardResponse(
         data={
             "period": period,
@@ -446,6 +470,8 @@ async def get_analytics_summary(
             "avg_response_time_minutes": round(avg_response, 1) if avg_response else 0.0,
             "judge_decisions_period": decisions or 0,
             "agent_health_distribution": health_dist,
+            "agent_breakdown": agent_breakdown,
+            "swarm_breakdown": swarm_breakdown,
         },
         message="Analytics summary retrieved",
     )

@@ -56,12 +56,12 @@ class GeminiCacheService:
         """
         cache_key = _make_cache_key(metadata, verdict)
 
+        from datetime import datetime, timezone
+
         result = await db.execute(
             select(GeminiCache).where(
                 GeminiCache.cache_key == cache_key,
-                GeminiCache.expires_at > db.bind.dialect.dbapi.datetime.now()
-                if hasattr(db.bind.dialect, "dbapi")
-                else True,
+                GeminiCache.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
             )
         )
         cached = result.scalar_one_or_none()

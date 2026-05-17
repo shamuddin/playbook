@@ -21,9 +21,10 @@ from app.schemas import (
     StandardResponse,
     TimelineEventResponse,
 )
-from app.models import EvidencePackage
+from app.models import EvidencePackage, JudgeDecision
 from app.services.detect import DetectionEngine, IncidentFactory, normalize_event
 from app.services.forensics import ForensicsService
+from app.services.gemini_reasoning import analyze_incident
 from app.services.response_engine import ResponseEngine
 from app.services.websocket_manager import ws_manager
 
@@ -50,7 +51,7 @@ async def _get_incident_or_404(
     return incident
 
 
-def _incident_to_response(incident: Incident) -> IncidentResponse:
+def _incident_to_response(incident: Incident, judge_verdict: Optional[str] = None) -> IncidentResponse:
     """Convert an Incident model to an IncidentResponse schema."""
     return IncidentResponse(
         id=incident.id,
@@ -64,8 +65,11 @@ def _incident_to_response(incident: Incident) -> IncidentResponse:
         playbook_id=incident.playbook_id,
         response_status=incident.response_status,
         forensics_status=incident.forensics_status,
-        judge_verdict=None,
+        judge_verdict=judge_verdict,
         bypass_detected=incident.bypass_detected,
+        description=incident.event_id or '',
+        agent_id=incident.agent_id or '',
+        swarm_id=incident.swarm_id or '',
         created_at=incident.created_at,
         updated_at=incident.updated_at,
     )
@@ -151,14 +155,45 @@ async def ingest_event(
     engine = DetectionEngine()
     detection = engine.evaluate(event)
 
-    # If no match, still create a low-confidence incident (coverage gap)
+    # If no match, try to use Lobster Trap metadata for smarter classification
     if detection.incident_type is None:
-        detection.incident_type = "AGT-GAP-012"
-        detection.incident_type_name = "Coverage Gap"
-        detection.severity = "low"
-        detection.confidence = 0.1
-        detection.anomaly_score = 10.0
-        detection.category = "coverage"
+        raw = request.event_data
+        lt_meta = raw.get("_lobstertrap") if isinstance(raw, dict) else None
+        ingress = lt_meta.get("ingress") if isinstance(lt_meta, dict) else None
+        rule_name = ingress.get("rule_name") if isinstance(ingress, dict) else None
+        verdict = lt_meta.get("verdict") if isinstance(lt_meta, dict) else None
+        risk_score = raw.get("risk_score", 0.0) if isinstance(raw, dict) else 0.0
+
+        # Map Lobster Trap rule names to incident types
+        rule_map = {
+            "block_prompt_injection": ("AGT-INJ-006", "Prompt Injection", "injection", "high"),
+            "block_obfuscation_evasion": ("AGT-BYP-014", "Guardrail Bypass", "bypass", "high"),
+            "block_data_exfiltration": ("AGT-EXT-005", "Data Exfiltration", "exfiltration", "critical"),
+            "block_dangerous_commands": ("AGT-DEL-001", "Data Destruction", "integrity", "critical"),
+            "block_sensitive_paths": ("AGT-DEL-001", "Data Destruction", "integrity", "critical"),
+            "block_malware_request": ("AGT-INJ-006", "Malware Request", "injection", "high"),
+            "block_phishing_fraud": ("AGT-REG-016", "Regulatory Trigger", "compliance", "high"),
+            "block_pii_request": ("AGT-PRV-015", "Privacy Violation", "privacy", "high"),
+            "block_pii_leak": ("AGT-PRV-015", "Privacy Violation", "privacy", "high"),
+            "block_credential_leak": ("AGT-CRE-008", "Credential Exposure", "secrets", "critical"),
+            "block_harm_violence": ("AGT-HRM-004", "Harmful Content", "safety", "high"),
+            "review_role_impersonation": ("AGT-PER-003", "Permission Escalation", "access", "medium"),
+        }
+
+        mapped = rule_map.get(rule_name)
+        if mapped and verdict == "DENY":
+            detection.incident_type, detection.incident_type_name, detection.category, detection.severity = mapped
+            detection.confidence = round(max(0.6, min(risk_score + 0.2, 0.95)), 2)
+            detection.anomaly_score = round(detection.confidence * 100, 2)
+            detection.matched_rules = [f"RULE-LT-{mapped[0].split('-')[2]}"]
+        else:
+            # Fallback: coverage gap (suppressed by default in list view)
+            detection.incident_type = "AGT-GAP-012"
+            detection.incident_type_name = "Coverage Gap"
+            detection.severity = "low"
+            detection.confidence = 0.1
+            detection.anomaly_score = 10.0
+            detection.category = "coverage"
 
     # Create incident
     incident = await IncidentFactory.create_incident(db, event, detection)
@@ -183,20 +218,33 @@ async def list_incidents(
     status: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
+    agent_id: Optional[str] = Query(None, description="Filter by agent ID"),
+    swarm_id: Optional[str] = Query(None, description="Filter by swarm ID"),
     q: Optional[str] = Query(None, description="Free-text search"),
+    include_gap: bool = Query(False, description="Include AGT-GAP-012 coverage-gap incidents"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> IncidentListResponse:
-    """List incidents with filtering and pagination."""
+    """List incidents with filtering and pagination.
+
+    By default, low-confidence AGT-GAP-012 coverage-gap incidents are hidden
+    to keep the dashboard focused on actionable detections.
+    """
     query = select(Incident)
 
+    if not include_gap:
+        query = query.where(Incident.incident_type != "AGT-GAP-012")
     if status:
         query = query.where(Incident.status == status)
     if severity:
         query = query.where(Incident.severity == severity)
     if category:
         query = query.where(Incident.category == category)
+    if agent_id:
+        query = query.where(Incident.agent_id == agent_id)
+    if swarm_id:
+        query = query.where(Incident.swarm_id == swarm_id)
     if q:
         query = query.where(
             (Incident.incident_id.ilike(f"%{q}%"))
@@ -206,12 +254,18 @@ async def list_incidents(
 
     # Get total count
     count_query = select(Incident.id).select_from(Incident)
+    if not include_gap:
+        count_query = count_query.where(Incident.incident_type != "AGT-GAP-012")
     if status:
         count_query = count_query.where(Incident.status == status)
     if severity:
         count_query = count_query.where(Incident.severity == severity)
     if category:
         count_query = count_query.where(Incident.category == category)
+    if agent_id:
+        count_query = count_query.where(Incident.agent_id == agent_id)
+    if swarm_id:
+        count_query = count_query.where(Incident.swarm_id == swarm_id)
     if q:
         count_query = count_query.where(
             (Incident.incident_id.ilike(f"%{q}%"))
@@ -227,8 +281,20 @@ async def list_incidents(
     result = await db.execute(query)
     incidents = result.scalars().all()
 
+    # Batch-fetch judge verdicts
+    jd_ids = [inc.judge_decision_id for inc in incidents if inc.judge_decision_id]
+    verdict_map = {}
+    if jd_ids:
+        jd_result = await db.execute(
+            select(JudgeDecision.id, JudgeDecision.verdict).where(JudgeDecision.id.in_(jd_ids))
+        )
+        verdict_map = {row[0]: row[1] for row in jd_result.all()}
+
     return IncidentListResponse(
-        data=[_incident_to_response(inc) for inc in incidents],
+        data=[
+            _incident_to_response(inc, judge_verdict=verdict_map.get(inc.judge_decision_id))
+            for inc in incidents
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -242,7 +308,15 @@ async def get_incident(
 ) -> IncidentResponse:
     """Get a single incident by its public incident_id."""
     incident = await _get_incident_or_404(db, incident_id)
-    return _incident_to_response(incident)
+    verdict = None
+    if incident.judge_decision_id:
+        jd_result = await db.execute(
+            select(JudgeDecision).where(JudgeDecision.id == incident.judge_decision_id)
+        )
+        jd = jd_result.scalar_one_or_none()
+        if jd:
+            verdict = jd.verdict
+    return _incident_to_response(incident, judge_verdict=verdict)
 
 
 @router.post("/{incident_id}/classify", response_model=IncidentResponse)
@@ -373,7 +447,7 @@ async def update_incident_status(
     """Update the status of an incident (human review action)."""
     incident = await _get_incident_or_404(db, incident_id)
 
-    valid_statuses = {"new", "detected", "classified", "responding", "resolved", "escalated"}
+    valid_statuses = {"new", "detected", "classified", "investigating", "responding", "resolved", "false_positive", "escalated"}
     if status not in valid_statuses:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -472,3 +546,55 @@ async def get_incident_forensics(
         message = "Evidence package retrieved"
 
     return StandardResponse(data=data, message=message)
+
+
+@router.get("/{incident_id}/gemini-analysis", response_model=StandardResponse)
+async def get_incident_gemini_analysis(
+    incident_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Generate a Gemini-powered security analysis for an incident.
+
+    Uses the incident's metadata, detection results, and judge verdict
+    to produce a threat analysis, impact assessment, and remediation plan.
+    """
+    incident = await _get_incident_or_404(db, incident_id)
+
+    # Load metadata for tool_call context
+    meta_result = await db.execute(
+        select(IncidentMetadata).where(IncidentMetadata.incident_id == incident.id)
+    )
+    metadata = meta_result.scalar_one_or_none()
+    tool_call = ""
+    if metadata and metadata.full_metadata_json:
+        event_data = metadata.full_metadata_json.get("event", {})
+        tool_call = event_data.get("tool_call", "") or event_data.get("input", "")
+
+    # Resolve judge verdict from linked decision
+    verdict = "PENDING"
+    if incident.judge_decision_id:
+        jd_result = await db.execute(
+            select(JudgeDecision).where(JudgeDecision.id == incident.judge_decision_id)
+        )
+        jd = jd_result.scalar_one_or_none()
+        if jd:
+            verdict = jd.verdict
+
+    analysis = analyze_incident(
+        incident_type=incident.incident_type,
+        severity=incident.severity or "medium",
+        confidence=incident.confidence or 0.0,
+        category=incident.category or "unknown",
+        tool_call=tool_call,
+        judge_verdict=verdict,
+        bypass_detected=incident.bypass_detected or False,
+    )
+
+    return StandardResponse(
+        data={
+            "incident_id": incident_id,
+            "model": "gemini-1.5-flash",
+            "analysis": analysis,
+        },
+        message="AI security analysis generated",
+    )

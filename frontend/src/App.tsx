@@ -13,6 +13,7 @@ import SettingsPage from './pages/SettingsPage'
 import ForensicsPage from './pages/ForensicsPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import PlaygroundPage from './pages/PlaygroundPage'
+import AgentSwarmPage from './pages/AgentSwarmPage'
 import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
 
@@ -20,7 +21,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
       </div>
     )
@@ -56,6 +57,7 @@ function AppRoutes() {
         <Route path="forensics/:id" element={<ForensicsPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="playground" element={<PlaygroundPage />} />
+        <Route path="swarm" element={<AgentSwarmPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
@@ -64,7 +66,7 @@ function AppRoutes() {
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <AppRoutes />
       </AuthProvider>

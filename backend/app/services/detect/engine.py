@@ -294,6 +294,87 @@ _STATIC_RULES: List[Dict[str, any]] = [
         ],
         "threshold": 0.5,
     },
+    # --- Lobster Trap DPI rules ---
+    {
+        "rule_id": "RULE-LT-INJ",
+        "name": "Lobster Trap Prompt Injection Blocked",
+        "incident_type": "AGT-INJ-006",
+        "severity": "high",
+        "patterns": [r"block_prompt_injection"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-EXT",
+        "name": "Lobster Trap Data Exfiltration Blocked",
+        "incident_type": "AGT-EXT-005",
+        "severity": "critical",
+        "patterns": [r"block_data_exfiltration"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-DEL",
+        "name": "Lobster Trap Dangerous Command Blocked",
+        "incident_type": "AGT-DEL-001",
+        "severity": "critical",
+        "patterns": [r"block_dangerous_commands"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-MAL",
+        "name": "Lobster Trap Malware Request Blocked",
+        "incident_type": "AGT-INJ-006",
+        "severity": "high",
+        "patterns": [r"block_malware_request"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-PHI",
+        "name": "Lobster Trap Phishing/Fraud Blocked",
+        "incident_type": "AGT-REG-016",
+        "severity": "high",
+        "patterns": [r"block_phishing_fraud"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-PII",
+        "name": "Lobster Trap PII Request Blocked",
+        "incident_type": "AGT-PRV-015",
+        "severity": "high",
+        "patterns": [r"block_pii_request"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-CRE",
+        "name": "Lobster Trap Credential Leak Blocked",
+        "incident_type": "AGT-CRE-008",
+        "severity": "critical",
+        "patterns": [r"block_credential_leak"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-HRM",
+        "name": "Lobster Trap Harmful Content Blocked",
+        "incident_type": "AGT-HRM-004",
+        "severity": "high",
+        "patterns": [r"block_harm_violence"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-BYP",
+        "name": "Lobster Trap Bypass Attempt Blocked",
+        "incident_type": "AGT-BYP-014",
+        "severity": "high",
+        "patterns": [r"block_obfuscation_evasion"],
+        "threshold": 0.1,
+    },
+    {
+        "rule_id": "RULE-LT-ROLE",
+        "name": "Lobster Trap Role Impersonation Detected",
+        "incident_type": "AGT-PER-003",
+        "severity": "medium",
+        "patterns": [r"review_role_impersonation"],
+        "threshold": 0.1,
+    },
 ]
 
 
@@ -350,6 +431,14 @@ class DetectionEngine:
         for rule in db_rules:
             # Split stored pipe-delimited pattern into individual patterns
             patterns = [p.strip() for p in rule.pattern.split("|") if p.strip()]
+            compiled = []
+            for p in patterns:
+                try:
+                    compiled.append(re.compile(p, re.IGNORECASE))
+                except re.error:
+                    continue
+            if not compiled:
+                continue
             new_rules.append({
                 "rule_id": rule.rule_id,
                 "name": rule.name,
@@ -358,7 +447,7 @@ class DetectionEngine:
                 "patterns": patterns,
                 "threshold": rule.threshold or 0.5,
                 "is_active": rule.is_active,
-                "_compiled": [re.compile(p, re.IGNORECASE) for p in patterns],
+                "_compiled": compiled,
             })
 
         self._rules = new_rules
@@ -395,7 +484,7 @@ class DetectionEngine:
             if total_patterns == 0:
                 continue
 
-            score = 1.0 if match_count > 0 else 0.0
+            score = match_count / total_patterns if total_patterns > 0 else 0.0
             threshold = rule.get("threshold", 0.5)
 
             if score >= threshold and score > best_score:

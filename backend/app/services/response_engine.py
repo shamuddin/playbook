@@ -24,6 +24,7 @@ from app.models import (
     ResponseStep,
     TimelineEvent,
     HumanReviewTask,
+    utc_now,
 )
 from app.services.websocket_manager import ws_manager
 
@@ -156,7 +157,7 @@ class ResponseEngine:
                     "task_id": review_task.task_id,
                     "incident_id": incident.incident_id,
                     "sla_deadline": (
-                        datetime.now(timezone.utc) + timedelta(minutes=30)
+                        utc_now() + timedelta(minutes=30)
                     ).isoformat(),
                     "severity": incident.severity,
                 })
@@ -219,7 +220,7 @@ class ResponseEngine:
         step.cli_stderr = stderr
         step.cli_returncode = returncode
         step.error_message = error_message
-        step.executed_at = datetime.fromtimestamp(executed_at, tz=timezone.utc)
+        step.executed_at = utc_now()
 
         # Add timeline event for this action
         timeline = TimelineEvent(
@@ -374,7 +375,7 @@ class ResponseEngine:
         )
         response_record.steps_completed = steps_completed
         response_record.steps_failed = steps_failed
-        response_record.completed_at = datetime.now(timezone.utc)
+        response_record.completed_at = utc_now()
 
         # Update incident
         incident.response_status = response_record.status

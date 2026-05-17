@@ -1,0 +1,460 @@
+{
+  "errors": [
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MjgyYTZhNS0xNzNjLTQzNmEtODNhMi02M2VlNTMwMjQ4ZTEiLCJlbWFpbCI6ImRlbW9AcGxheWJvb2subG9jYWwiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3Nzg5NjA1OTR9.XNfaduTbY4PpbfRYUxrCncEHmKvG7MvwLY-HhCI_xpM' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/hooks/useWebSocket.ts",
+        "line": 75,
+        "column": 0,
+        "lineNumber": 75,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MjgyYTZhNS0xNzNjLTQzNmEtODNhMi02M2VlNTMwMjQ4ZTEiLCJlbWFpbCI6ImRlbW9AcGxheWJvb2subG9jYWwiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3Nzg5NjA1OTR9.XNfaduTbY4PpbfRYUxrCncEHmKvG7MvwLY-HhCI_xpM' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/hooks/useWebSocket.ts",
+        "line": 75,
+        "column": 0,
+        "lineNumber": 75,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MjgyYTZhNS0xNzNjLTQzNmEtODNhMi02M2VlNTMwMjQ4ZTEiLCJlbWFpbCI6ImRlbW9AcGxheWJvb2subG9jYWwiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3Nzg5NjA1OTR9.XNfaduTbY4PpbfRYUxrCncEHmKvG7MvwLY-HhCI_xpM' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/hooks/useWebSocket.ts",
+        "line": 75,
+        "column": 0,
+        "lineNumber": 75,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "error",
+      "text": "Warning: Each child in a list should have a unique \"key\" prop.%s%s See https://reactjs.org/link/warning-keys for more information.%s \n\nCheck the render method of `PipelineVisualization`.  \n    at PipelineVisualization (http://localhost:5175/src/pages/IncidentDetailPage.tsx?t=1778954395386:1118:3)\n    at div\n    at IncidentDetailPage (http://localhost:5175/src/pages/IncidentDetailPage.tsx?t=1778954395386:39:18)\n    at RenderedRoute (http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94:4129:5)\n    at Outlet (http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94:4535:26)\n    at main\n    at div\n    at div\n    at Layout (http://localhost:5175/src/components/Layout.tsx?t=1778953070498:24:41)\n    at ProtectedRoute (http://localhost:5175/src/App.tsx?t=1778954628764:36:27)\n    at RenderedRoute (http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94:4129:5)\n    at Routes (http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94:4599:5)\n    at AppRoutes\n    at AuthProvider (http://localhost:5175/src/components/AuthProvider.tsx:21:32)\n    at Router (http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94:4542:15)\n    at BrowserRouter (http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94:5288:5)\n    at App",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=3d454c94",
+        "line": 61,
+        "column": 37,
+        "lineNumber": 61,
+        "columnNumber": 37
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MjgyYTZhNS0xNzNjLTQzNmEtODNhMi02M2VlNTMwMjQ4ZTEiLCJlbWFpbCI6ImRlbW9AcGxheWJvb2subG9jYWwiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3Nzg5NjA1OTR9.XNfaduTbY4PpbfRYUxrCncEHmKvG7MvwLY-HhCI_xpM' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/hooks/useWebSocket.ts",
+        "line": 75,
+        "column": 0,
+        "lineNumber": 75,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/pages/AgentSwarmPage.tsx?t=1778954539781",
+        "line": 184,
+        "column": 0,
+        "lineNumber": 184,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MjgyYTZhNS0xNzNjLTQzNmEtODNhMi02M2VlNTMwMjQ4ZTEiLCJlbWFpbCI6ImRlbW9AcGxheWJvb2subG9jYWwiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3Nzg5NjA1OTR9.XNfaduTbY4PpbfRYUxrCncEHmKvG7MvwLY-HhCI_xpM' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/hooks/useWebSocket.ts",
+        "line": 75,
+        "column": 0,
+        "lineNumber": 75,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "interaction",
+      "text": "incidents filter: page.selectOption: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('select:has-text(\"All\")')\u001b[22m\n\u001b[2m    - locator resolved to 3 elements. Proceeding with the first one: <select class=\"px-3 py-2 border border-gray-200 bg-white text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500\">…</select>\u001b[22m\n\u001b[2m  - attempting select option action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    58 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m       - did not find some options\u001b[22m\n\u001b[2m     - retrying select option action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n"
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3MjgyYTZhNS0xNzNjLTQzNmEtODNhMi02M2VlNTMwMjQ4ZTEiLCJlbWFpbCI6ImRlbW9AcGxheWJvb2subG9jYWwiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3Nzg5NjA1OTR9.XNfaduTbY4PpbfRYUxrCncEHmKvG7MvwLY-HhCI_xpM' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/hooks/useWebSocket.ts",
+        "line": 75,
+        "column": 0,
+        "lineNumber": 75,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.",
+      "location": {
+        "url": "http://localhost:5175/node_modules/.vite/deps/react-router-dom.js?v=3d454c94",
+        "line": 4433,
+        "column": 12,
+        "lineNumber": 4433,
+        "columnNumber": 12
+      }
+    },
+    {
+      "type": "warning",
+      "text": "WebSocket connection to 'ws://localhost:8002/api/v1/ws/incidents' failed: WebSocket is closed before the connection is established.",
+      "location": {
+        "url": "http://localhost:5175/src/pages/AgentSwarmPage.tsx?t=1778954539781",
+        "line": 184,
+        "column": 0,
+        "lineNumber": 184,
+        "columnNumber": 0
+      }
+    }
+  ],
+  "networkErrors": []
+}

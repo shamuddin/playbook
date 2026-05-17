@@ -82,7 +82,7 @@ async def explain_decision(
         )
 
     # 3. Generate explanation via Gemini API or fallback
-    explanation = explain_judge_decision(
+    explanation = await explain_judge_decision(
         decision_id=decision.decision_id,
         verdict=decision.verdict,
         severity_score=decision.severity_score,

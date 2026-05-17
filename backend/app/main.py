@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.database import AsyncSessionLocal, engine
-from app.models import Base, PlaygroundSession, PlaygroundSessionStatus, utc_now
+from app.models import Agent, Base, PlaygroundSession, PlaygroundSessionStatus, utc_now
 from app.core.security import get_current_user
 from app.routers import (
     agents,
@@ -28,6 +29,7 @@ from app.routers import (
     playbooks,
     playground,
     policy_builder,
+    swarm,
     websocket,
 )
 from app.seed import seed_all
@@ -56,14 +58,14 @@ async def lifespan(app: FastAPI):
             await db.commit()
             if result.rowcount:
                 print(f"[startup] Reset {result.rowcount} orphaned playground session(s) to ERROR")
-                # Also mark mirrored agents offline since their session died
+                # Only mark playground-scoped agents offline since their session died
                 await db.execute(
                     update(Agent)
-                    .where(Agent.status == "online")
+                    .where(Agent.status == "online", Agent.system_id.like("pg-%"))
                     .values(status="offline")
                 )
                 await db.commit()
-                print("[startup] Mirrored agents marked offline")
+                print("[startup] Mirrored playground agents marked offline")
         except Exception as exc:
             print(f"[startup] Warning: failed to reset orphaned sessions: {exc}")
 
@@ -106,6 +108,8 @@ async def lifespan(app: FastAPI):
                         "category": incident.category,
                         "incident_type": incident.incident_type,
                         "confidence": incident.confidence,
+                        "agent_id": incident.agent_id,
+                        "swarm_id": incident.swarm_id,
                         "timestamp": incident.created_at.isoformat(),
                     })
                 except Exception as exc:
@@ -144,6 +148,24 @@ async def lifespan(app: FastAPI):
                             incident = await IncidentFactory.create_incident(
                                 session, event, detection
                             )
+                            # Create JudgeDecision for Lobster Trap events
+                            from app.models import JudgeDecision
+                            verdict = "DENY" if "block_" in str(detection.matched_rules) else "QUARANTINE"
+                            decision = JudgeDecision(
+                                decision_id=f"JDG-{uuid.uuid4().hex[:12].upper()}",
+                                incident_id=incident.id,
+                                agent_id="lobstertrap-proxy",
+                                verdict=verdict,
+                                severity_score=round(detection.confidence * 100, 1),
+                                confidence=round(detection.confidence, 2),
+                                matched_rules=detection.matched_rules or [],
+                                bypass_patterns_detected=[],
+                                rationale=f"Lobster Trap DPI rule matched: {detection.matched_rules}",
+                                latency_ms=detection.latency_ms,
+                            )
+                            session.add(decision)
+                            await session.flush()
+                            incident.judge_decision_id = decision.id
                             await session.commit()
                             await ws_manager.broadcast({
                                 "event_type": "incident_detected",
@@ -153,6 +175,8 @@ async def lifespan(app: FastAPI):
                                 "category": incident.category,
                                 "incident_type": incident.incident_type,
                                 "confidence": incident.confidence,
+                                "agent_id": incident.agent_id,
+                                "swarm_id": incident.swarm_id,
                                 "timestamp": incident.created_at.isoformat(),
                             })
                         except Exception as exc:
@@ -253,6 +277,7 @@ app.include_router(dashboard.router, prefix=settings.api_prefix, dependencies=_a
 app.include_router(integrations.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 app.include_router(lobstertrap.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 app.include_router(playground.router, prefix=settings.api_prefix, dependencies=_auth_dep)
+app.include_router(swarm.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 app.include_router(gemini.router, prefix=settings.api_prefix, dependencies=_auth_dep)
 # WebSocket router handles auth internally via query params — don't apply HTTP Bearer deps
 app.include_router(websocket.router, prefix=settings.api_prefix)

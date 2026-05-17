@@ -19,6 +19,7 @@ from app.models import (
     ODPConflict,
     OrganizationODP,
     PolicyVersion,
+    utc_now,
 )
 from app.policy import BaselineLoader, ConflictDetector, ODPResolver
 from app.schemas import (
@@ -405,12 +406,12 @@ async def update_odp(
 
         applied += 1
 
-    await db.commit()
-
     # Run validation if not skipped
     conflicts = 0
     if not request.skip_validation:
         conflicts = await _validate_baseline(db, baseline)
+
+    await db.commit()
 
     # Build resolved policy
     odp_result = await db.execute(
@@ -422,6 +423,7 @@ async def update_odp(
     latest_version = await db.execute(
         select(PolicyVersion).where(PolicyVersion.baseline_id == baseline.id)
         .order_by(PolicyVersion.version_number.desc())
+        .limit(1)
     )
     latest = latest_version.scalar_one_or_none()
 
@@ -975,6 +977,7 @@ async def list_conflicts(
             "items": [
                 {
                     "id": c.id,
+                    "baseline_id": c.baseline_id,
                     "conflict_id": c.conflict_id,
                     "conflict_type": c.conflict_type,
                     "severity": c.severity,
@@ -1095,12 +1098,25 @@ def _build_effective_policy(baseline: NistBaseline, odps: List[OrganizationODP])
 
 
 async def _validate_baseline(db: AsyncSession, baseline: NistBaseline) -> int:
-    """Run conflict detection for a single baseline. Returns conflict count."""
+    """Run conflict detection for a single baseline. Returns conflict count.
+
+    Idempotent: skips creating conflicts that already exist, and resolves stale
+    open conflicts when the underlying condition is fixed.
+    """
+    from sqlalchemy import update
+
     odp_result = await db.execute(
         select(OrganizationODP).where(OrganizationODP.baseline_id == baseline.id)
     )
     odps = {o.odp_key: o.odp_value for o in odp_result.scalars().all()}
 
+    # Load existing conflicts for this baseline
+    existing_result = await db.execute(
+        select(ODPConflict).where(ODPConflict.baseline_id == baseline.id)
+    )
+    existing = {c.conflict_id: c for c in existing_result.scalars().all()}
+
+    expected_ids: set[str] = set()
     conflicts_created = 0
 
     # Missing required
@@ -1110,19 +1126,23 @@ async def _validate_baseline(db: AsyncSession, baseline: NistBaseline) -> int:
         "compliance_report", "record_threshold",
     }
     for key in required - set(odps.keys()):
-        conflict = ODPConflict(
-            conflict_id=f"CONF-{baseline.incident_type}-MISSING-{key}",
-            baseline_id=baseline.id,
-            odp_id="",
-            conflict_type="MISSING_REQUIRED",
-            severity="BLOCKED",
-            message=f"Missing required ODP: {key}",
-            expected_value="defined",
-            actual_value="undefined",
-            status="open",
-        )
-        db.add(conflict)
-        conflicts_created += 1
+        cid = f"CONF-{baseline.incident_type}-MISSING-{key}"
+        expected_ids.add(cid)
+        if cid not in existing:
+            db.add(
+                ODPConflict(
+                    conflict_id=cid,
+                    baseline_id=baseline.id,
+                    odp_id="",
+                    conflict_type="MISSING_REQUIRED",
+                    severity="BLOCKED",
+                    message=f"Missing required ODP: {key}",
+                    expected_value="defined",
+                    actual_value="undefined",
+                    status="open",
+                )
+            )
+            conflicts_created += 1
 
     # Severity downgrade
     if "severity_threshold" in odps:
@@ -1130,53 +1150,77 @@ async def _validate_baseline(db: AsyncSession, baseline: NistBaseline) -> int:
         base_sev = baseline.severity.lower()
         severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
         if severity_rank.get(st, 0) < severity_rank.get(base_sev, 0):
-            conflict = ODPConflict(
-                conflict_id=f"CONF-{baseline.incident_type}-SEVERITY",
-                baseline_id=baseline.id,
-                odp_id="",
-                conflict_type="SEVERITY_DOWNGRADE",
-                severity="BLOCKED",
-                message=f"Severity threshold ({st}) is lower than NIST baseline ({base_sev})",
-                expected_value=base_sev,
-                actual_value=st,
-                status="open",
-            )
-            db.add(conflict)
-            conflicts_created += 1
+            cid = f"CONF-{baseline.incident_type}-SEVERITY"
+            expected_ids.add(cid)
+            if cid not in existing:
+                db.add(
+                    ODPConflict(
+                        conflict_id=cid,
+                        baseline_id=baseline.id,
+                        odp_id="",
+                        conflict_type="SEVERITY_DOWNGRADE",
+                        severity="BLOCKED",
+                        message=f"Severity threshold ({st}) is lower than NIST baseline ({base_sev})",
+                        expected_value=base_sev,
+                        actual_value=st,
+                        status="open",
+                    )
+                )
+                conflicts_created += 1
 
     # Auto-contain disabled
     if odps.get("auto_contain_enabled", "").lower() == "false" and baseline.auto_contain_enabled:
-        conflict = ODPConflict(
-            conflict_id=f"CONF-{baseline.incident_type}-AUTOCONTAIN",
-            baseline_id=baseline.id,
-            odp_id="",
-            conflict_type="VALUE_MISMATCH",
-            severity="WARNING",
-            message="Auto-contain is disabled but NIST baseline recommends enabled",
-            expected_value="true",
-            actual_value="false",
-            status="open",
-        )
-        db.add(conflict)
-        conflicts_created += 1
+        cid = f"CONF-{baseline.incident_type}-AUTOCONTAIN"
+        expected_ids.add(cid)
+        if cid not in existing:
+            db.add(
+                ODPConflict(
+                    conflict_id=cid,
+                    baseline_id=baseline.id,
+                    odp_id="",
+                    conflict_type="VALUE_MISMATCH",
+                    severity="WARNING",
+                    message="Auto-contain is disabled but NIST baseline recommends enabled",
+                    expected_value="true",
+                    actual_value="false",
+                    status="open",
+                )
+            )
+            conflicts_created += 1
 
     # Empty escalation contacts
     if "escalation_contacts" in odps:
         contacts = odps["escalation_contacts"]
         if not contacts or contacts in ("[]", "", "null"):
-            conflict = ODPConflict(
-                conflict_id=f"CONF-{baseline.incident_type}-ESCALATION",
-                baseline_id=baseline.id,
-                odp_id="",
-                conflict_type="MISSING_REQUIRED",
-                severity="BLOCKED",
-                message="No escalation contacts defined",
-                expected_value="at least one contact",
-                actual_value="none",
-                status="open",
-            )
-            db.add(conflict)
-            conflicts_created += 1
+            cid = f"CONF-{baseline.incident_type}-ESCALATION"
+            expected_ids.add(cid)
+            if cid not in existing:
+                db.add(
+                    ODPConflict(
+                        conflict_id=cid,
+                        baseline_id=baseline.id,
+                        odp_id="",
+                        conflict_type="MISSING_REQUIRED",
+                        severity="BLOCKED",
+                        message="No escalation contacts defined",
+                        expected_value="at least one contact",
+                        actual_value="none",
+                        status="open",
+                    )
+                )
+                conflicts_created += 1
+
+    # Resolve stale open conflicts that are no longer expected
+    stale_ids = [
+        c.id for c in existing.values()
+        if c.status == "open" and c.conflict_id not in expected_ids
+    ]
+    if stale_ids:
+        await db.execute(
+            update(ODPConflict)
+            .where(ODPConflict.id.in_(stale_ids))
+            .values(status="resolved", resolved_at=utc_now())
+        )
 
     await db.flush()
     return conflicts_created

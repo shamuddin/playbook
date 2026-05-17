@@ -1,5 +1,6 @@
 """Compliance API router."""
 
+import html
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import ComplianceMapping, Incident, NistBaseline
 from app.schemas import ComplianceMappingResponse, ComplianceReportResponse, StandardResponse
+from app.services.gemini_reasoning import generate_compliance_report
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -196,12 +198,12 @@ def _build_compliance_html(incident, framework: str, mappings) -> str:
     for m in mappings:
         rows += f"""
         <tr>
-            <td style="padding:10px;border:1px solid #E5E7EB;font-family:monospace;font-size:12px">{m.control_id}</td>
-            <td style="padding:10px;border:1px solid #E5E7EB;font-size:13px">{m.control_name}</td>
+            <td style="padding:10px;border:1px solid #E5E7EB;font-family:monospace;font-size:12px">{html.escape(str(m.control_id))}</td>
+            <td style="padding:10px;border:1px solid #E5E7EB;font-size:13px">{html.escape(str(m.control_name))}</td>
             <td style="padding:10px;border:1px solid #E5E7EB;font-size:13px;text-align:center">
-                <span style="display:inline-block;padding:3px 10px;border-radius:9999px;font-size:11px;font-weight:600;color:#fff;background:{severity_color if m.risk_level == 'critical' else '#6B7280'}">{m.risk_level.upper()}</span>
+                <span style="display:inline-block;padding:3px 10px;border-radius:9999px;font-size:11px;font-weight:600;color:#fff;background:{severity_color if m.risk_level == 'critical' else '#6B7280'}">{html.escape(str(m.risk_level).upper())}</span>
             </td>
-            <td style="padding:10px;border:1px solid #E5E7EB;font-size:13px">{m.mapping_data or '—'}</td>
+            <td style="padding:10px;border:1px solid #E5E7EB;font-size:13px">{html.escape(str(m.mapping_data)) if m.mapping_data else '—'}</td>
         </tr>
         """
 
@@ -223,7 +225,7 @@ def _build_compliance_html(incident, framework: str, mappings) -> str:
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Compliance Report — {incident.incident_id}</title>
+    <title>Compliance Report — {html.escape(str(incident.incident_id))}</title>
     <style>
         @page {{ size: A4; margin: 20mm; }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111827; line-height: 1.5; max-width: 900px; margin: 0 auto; padding: 40px 20px; }}
@@ -239,23 +241,23 @@ def _build_compliance_html(incident, framework: str, mappings) -> str:
 <body>
     <h1>Compliance Report</h1>
     <div class="meta">
-        Framework: <strong>{framework_display}</strong> &nbsp;|&nbsp;
+        Framework: <strong>{html.escape(str(framework_display))}</strong> &nbsp;|&nbsp;
         Generated: {now} &nbsp;|&nbsp;
-        Incident: <code>{incident.incident_id}</code>
+        Incident: <code>{html.escape(str(incident.incident_id))}</code>
     </div>
 
     <div style="display:flex;gap:16px;margin-bottom:24px">
         <div style="flex:1;padding:16px;background:#F9FAFB;border-radius:8px">
             <div style="font-size:11px;color:#6B7280;text-transform:uppercase;font-weight:600">Incident Type</div>
-            <div style="font-size:15px;font-weight:600;margin-top:4px">{incident.incident_type}</div>
+            <div style="font-size:15px;font-weight:600;margin-top:4px">{html.escape(str(incident.incident_type))}</div>
         </div>
         <div style="flex:1;padding:16px;background:#F9FAFB;border-radius:8px">
             <div style="font-size:11px;color:#6B7280;text-transform:uppercase;font-weight:600">Severity</div>
-            <div style="margin-top:4px"><span class="badge">{incident.severity.upper()}</span></div>
+            <div style="margin-top:4px"><span class="badge">{html.escape(str(incident.severity).upper())}</span></div>
         </div>
         <div style="flex:1;padding:16px;background:#F9FAFB;border-radius:8px">
             <div style="font-size:11px;color:#6B7280;text-transform:uppercase;font-weight:600">Status</div>
-            <div style="font-size:15px;font-weight:600;margin-top:4px">{incident.status.upper()}</div>
+            <div style="font-size:15px;font-weight:600;margin-top:4px">{html.escape(str(incident.status).upper())}</div>
         </div>
     </div>
 
@@ -387,10 +389,14 @@ async def get_gap_analysis(
     coverage_pct = round(len(covered_types) / len(all_types) * 100, 1)
 
     # Risk-weighted gap score
-    critical_gaps = sum(
-        1 for itype in uncovered_types
+    critical_gap_types = [
+        itype for itype in uncovered_types
         if itype in ("AGT-DEL-001", "AGT-EXT-005", "AGT-CRE-008", "AGT-BYP-014")
-    )
+    ]
+    critical_gaps = [
+        {"incident_type": t, "name": INCIDENT_TYPES.get(t, "Unknown"), "missing_controls": 0}
+        for t in critical_gap_types
+    ]
 
     return StandardResponse(
         data={
@@ -415,4 +421,56 @@ async def get_gap_analysis(
             },
         },
         message=f"Gap analysis for {framework}: {coverage_pct}% coverage",
+    )
+
+
+@router.post("/gemini-report", response_model=StandardResponse)
+async def generate_ai_compliance_report(
+    framework: str = Query(..., description="Framework to generate report for"),
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Generate an AI-powered narrative compliance report.
+
+    Uses Gemini to produce an executive summary with overview,
+    critical gaps, and recommendations based on gap analysis data.
+    """
+    from app.core.constants import INCIDENT_TYPES
+
+    # Fetch mappings for the framework
+    result = await db.execute(
+        select(ComplianceMapping).where(ComplianceMapping.framework == framework)
+    )
+    mappings = result.scalars().all()
+
+    covered_types = {m.incident_type for m in mappings}
+    all_types = set(INCIDENT_TYPES.keys())
+    uncovered_types = sorted(all_types - covered_types)
+
+    # Build gap list for the AI
+    gaps = []
+    for m in mappings:
+        gaps.append({
+            "article": m.control_id,
+            "requirement": m.control_name,
+            "status": "Compliant" if m.risk_level != "critical" else "Gap",
+        })
+    for t in uncovered_types:
+        gaps.append({
+            "article": t,
+            "requirement": INCIDENT_TYPES.get(t, "Unknown"),
+            "status": "Uncovered",
+        })
+
+    # Sort so gaps appear first
+    gaps.sort(key=lambda x: 0 if x["status"] == "Gap" else 1 if x["status"] == "Uncovered" else 2)
+
+    report = await generate_compliance_report(framework, gaps[:15])
+
+    return StandardResponse(
+        data={
+            "framework": framework,
+            "model": "gemini-1.5-flash",
+            "report": report,
+        },
+        message=f"AI compliance report generated for {framework}",
     )

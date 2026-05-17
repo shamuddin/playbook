@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Activity,
   CheckCircle,
   XCircle,
   MinusCircle,
   Search,
+  Eye,
 } from 'lucide-react'
 import { getApiBase } from '../utils/config'
 import { apiFetch } from '../utils/api'
@@ -32,12 +34,14 @@ interface Agent {
 }
 
 export default function AgentHealthPage() {
+  const navigate = useNavigate()
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const { messages } = useWebSocket()
 
-  const fetchAgents = () => {
+  const fetchAgents = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     apiFetch(`${API_BASE}/agents`)
       .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
@@ -53,7 +57,7 @@ export default function AgentHealthPage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchAgents()
+      fetchAgents({ silent: true })
     }, 5000)
     return () => clearInterval(interval)
   }, [])
@@ -61,11 +65,9 @@ export default function AgentHealthPage() {
   useEffect(() => {
     if (messages.length === 0) return
     const latest = messages[0]
-    if (
-      latest.event_type === 'agent_status_updated' ||
-      (latest.agent_id !== undefined && latest.agent_id !== null)
-    ) {
-      fetchAgents()
+    // Only refresh on explicit agent status updates to avoid excessive polling
+    if (latest.event_type === 'agent_status_updated') {
+      fetchAgents({ silent: true })
     }
   }, [messages])
 
@@ -100,7 +102,7 @@ export default function AgentHealthPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <SummaryCard
           title="Total Agents"
           value={agents.length}
@@ -109,21 +111,27 @@ export default function AgentHealthPage() {
         />
         <SummaryCard
           title="Healthy"
-          value={agents.filter((a) => a.health_score >= 80).length}
+          value={agents.filter((a) => a.status === 'healthy' || a.status === 'online').length}
           icon={<CheckCircle className="w-5 h-5" />}
           color="bg-green-50 text-green-700"
         />
         <SummaryCard
           title="Degraded"
-          value={agents.filter((a) => a.health_score >= 50 && a.health_score < 80).length}
+          value={agents.filter((a) => a.status === 'degraded').length}
           icon={<MinusCircle className="w-5 h-5" />}
           color="bg-yellow-50 text-yellow-700"
         />
         <SummaryCard
           title="Critical"
-          value={agents.filter((a) => a.health_score < 50).length}
+          value={agents.filter((a) => a.status === 'critical').length}
           icon={<XCircle className="w-5 h-5" />}
           color="bg-red-50 text-red-700"
+        />
+        <SummaryCard
+          title="Offline"
+          value={agents.filter((a) => a.status === 'offline').length}
+          icon={<XCircle className="w-5 h-5" />}
+          color="bg-gray-100 text-gray-600"
         />
       </div>
 
@@ -149,6 +157,9 @@ export default function AgentHealthPage() {
               </th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">
                 Decision Rate
+              </th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">
+                Actions
               </th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase px-4 py-3">
                 Status
@@ -205,9 +216,15 @@ export default function AgentHealthPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="text-sm text-gray-700">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/incidents?agent_id=${encodeURIComponent(agent.system_id)}`)
+                    }}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline"
+                  >
                     {agent.incident_count}
-                  </span>
+                  </button>
                 </td>
                 <td className="px-4 py-3">
                   <span className="text-sm text-gray-700">
@@ -220,12 +237,26 @@ export default function AgentHealthPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/incidents?agent_id=${encodeURIComponent(agent.system_id)}`)
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100"
+                    title="View incidents for this agent"
+                  >
+                    <Eye className="w-3 h-3" /> View
+                  </button>
+                </td>
+                <td className="px-4 py-3">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-medium ${
                       agent.status === 'healthy' || agent.status === 'online'
                         ? 'bg-green-100 text-green-700'
                         : agent.status === 'degraded'
                         ? 'bg-yellow-100 text-yellow-700'
+                        : agent.status === 'offline'
+                        ? 'bg-gray-100 text-gray-600'
                         : 'bg-red-100 text-red-700'
                     }`}
                   >

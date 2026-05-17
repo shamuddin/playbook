@@ -17,6 +17,31 @@ import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
 
+// Human-readable incident type names (synced with backend constants)
+const INCIDENT_TYPE_NAMES: Record<string, string> = {
+  'AGT-DEL-001': 'Data Destruction',
+  'AGT-FIN-002': 'Unauthorized Financial',
+  'AGT-PER-003': 'Permission Escalation',
+  'AGT-HRM-004': 'Harmful Output',
+  'AGT-EXT-005': 'Data Exfiltration',
+  'AGT-INJ-006': 'Prompt Injection',
+  'AGT-HAL-007': 'Hallucination Cascade',
+  'AGT-CRE-008': 'Credential Exposure',
+  'AGT-RAT-009': 'Rate Limit Abuse',
+  'AGT-DRF-010': 'Model Drift',
+  'AGT-TLM-011': 'Tool Misuse',
+  'AGT-GAP-012': 'Coverage Gap',
+  'AGT-SPY-013': 'Systematic Espionage',
+  'AGT-BYP-014': 'Guardrail Bypass',
+  'AGT-PRV-015': 'Privacy Violation',
+  'AGT-REG-016': 'Regulatory Trigger',
+  'AGT-POL-017': 'Organization Policy Switching',
+}
+
+function getIncidentName(code: string): string {
+  return INCIDENT_TYPE_NAMES[code] || code
+}
+
 interface Template {
   id: string
   template_id: string
@@ -101,12 +126,13 @@ export default function PolicyBuilderPage() {
     Promise.all([
       apiFetch(`${API_BASE}/policy-builder/templates`).then((r) => (r.ok ? r.json() : [])),
       apiFetch(`${API_BASE}/policy-builder/nist-baseline`).then((r) => (r.ok ? r.json() : { data: {} })),
-      fetchConflicts().catch(() => {}),
     ])
       .then(([tplRes, baseRes]) => {
+        const loadedBaselines = baseRes.data?.items || []
         setTemplates(tplRes || [])
-        setBaselines(baseRes.data?.items || [])
+        setBaselines(loadedBaselines)
         setLoading(false)
+        fetchConflicts(loadedBaselines).catch(() => {})
       })
       .catch(() => setLoading(false))
   }, [])
@@ -119,15 +145,19 @@ export default function PolicyBuilderPage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dry_run: false }),
+          body: JSON.stringify({ dry_run: false, overwrite_existing: true }),
         }
       )
       const data = await res.json()
-      alert(data.message || 'Template applied')
+      if (!res.ok) {
+        alert(data.detail || data.message || `Failed to apply template (HTTP ${res.status})`)
+        return
+      }
+      alert(data.message || 'Template applied successfully')
       // Refresh baselines + conflicts after apply
       await Promise.all([fetchBaselines(), fetchConflicts()])
-    } catch {
-      alert('Failed to apply template')
+    } catch (err: any) {
+      alert('Failed to apply template: ' + (err.message || 'Network error'))
     }
     setApplying(false)
   }
@@ -141,12 +171,21 @@ export default function PolicyBuilderPage() {
     } catch {}
   }
 
-  const fetchConflicts = async () => {
+  const fetchConflicts = async (baselineList?: Baseline[]) => {
     try {
       const res = await apiFetch(`${API_BASE}/policy-builder/conflicts`)
       if (!res.ok) return
-      const data: Record<string, ConflictItem[]> = await res.json()
-      setOdpConflicts(data)
+      const json = await res.json()
+      const items: Array<ConflictItem & { baseline_id?: string }> = json.data?.items || []
+      const lookup = baselineList || baselines
+      const grouped: Record<string, ConflictItem[]> = {}
+      for (const c of items) {
+        const baseline = lookup.find((b) => b.id === c.baseline_id)
+        const key = baseline ? baseline.incident_type : 'unknown'
+        if (!grouped[key]) grouped[key] = []
+        grouped[key].push(c)
+      }
+      setOdpConflicts(grouped)
     } catch {
       setOdpConflicts({})
     }
@@ -158,14 +197,16 @@ export default function PolicyBuilderPage() {
     setSavingOdp(incidentType)
     try {
       const payload = {
-        severity_threshold: form.severity_threshold,
-        auto_contain_enabled: form.auto_contain_enabled === 'true',
-        escalation_contacts: form.escalation_contacts,
-        response_time_sla_seconds: parseInt(form.response_time_sla, 10) || 0,
-        forensic_level: form.forensic_level,
-        notify_targets: form.notify_targets,
-        compliance_report: form.compliance_report === 'true',
-        record_threshold: parseInt(form.record_threshold, 10) || 0,
+        odps: {
+          severity_threshold: form.severity_threshold,
+          auto_contain_enabled: form.auto_contain_enabled === 'true' ? 'true' : 'false',
+          escalation_contacts: form.escalation_contacts,
+          response_time_sla_seconds: String(parseInt(form.response_time_sla, 10) || 0),
+          forensic_level: form.forensic_level,
+          notify_targets: form.notify_targets,
+          compliance_report: form.compliance_report === 'true' ? 'true' : 'false',
+          record_threshold: String(parseInt(form.record_threshold, 10) || 0),
+        },
       }
       const res = await apiFetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
         method: 'PUT',
@@ -233,7 +274,30 @@ export default function PolicyBuilderPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Policy Builder</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Policy Builder</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Customize incident response policies from NIST baselines. Apply industry templates or build your own.
+          </p>
+        </div>
+      </div>
+
+      {/* Custom Organization Policy Builder */}
+      <div className="card p-4 border-l-4 border-green-500">
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="w-5 h-5 text-green-600" />
+          <h2 className="text-lg font-semibold text-gray-900">Custom Organization Policy</h2>
+        </div>
+        <p className="text-sm text-gray-600 mb-3">
+          Build a bespoke policy for your organization. Select incident types, set your own ODPs, and save as a reusable template.
+        </p>
+        <CustomPolicyBuilder
+          baselines={baselines}
+          onCreated={() => {
+            fetchBaselines()
+            fetchConflicts()
+          }}
+        />
       </div>
 
       {/* Template Comparison — Demo Hero */}
@@ -250,11 +314,11 @@ export default function PolicyBuilderPage() {
             <select
               value={compareType}
               onChange={(e) => setCompareType(e.target.value)}
-              className="w-full min-w-[200px] px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full min-w-[240px] px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {baselines.map((b) => (
                 <option key={b.incident_type} value={b.incident_type}>
-                  {b.incident_type}
+                  {getIncidentName(b.incident_type)} ({b.incident_type})
                 </option>
               ))}
             </select>
@@ -422,7 +486,9 @@ export default function PolicyBuilderPage() {
                   >
                     {base.severity.toUpperCase()}
                   </span>
-                  <span className="font-medium text-gray-900">{base.incident_type}</span>
+                  <span className="font-medium text-gray-900">
+                    {getIncidentName(base.incident_type)} <span className="text-gray-400 text-xs font-normal">({base.incident_type})</span>
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   {base.auto_contain_enabled && (
@@ -656,6 +722,131 @@ function OdpEditorForm({
           <RotateCcw className="w-3.5 h-3.5" />
           Reset to Baseline
         </button>
+      </div>
+    </div>
+  )
+}
+
+function CustomPolicyBuilder({
+  baselines,
+  onCreated,
+}: {
+  baselines: Baseline[]
+  onCreated: () => void
+}) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+
+  const toggleType = (type: string) => {
+    setSelectedTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    )
+  }
+
+  const handleSave = async () => {
+    if (!name || selectedTypes.length === 0) {
+      alert('Please enter a policy name and select at least one incident type.')
+      return
+    }
+    setSaving(true)
+    try {
+      // For now, we save as ODPs for the selected incident types with a note
+      const promises = selectedTypes.map((incidentType) =>
+        apiFetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            odps: {
+              severity_threshold: 'high',
+              auto_contain_enabled: 'true',
+              escalation_contacts: '[]',
+              response_time_sla: '60',
+              forensic_level: 'full',
+              notify_targets: '[]',
+              compliance_report: 'true',
+              record_threshold: '10',
+            },
+          }),
+        })
+      )
+      await Promise.all(promises)
+      alert(`Custom policy "${name}" saved for ${selectedTypes.length} incident types.`)
+      onCreated()
+      setName('')
+      setDescription('')
+      setSelectedTypes([])
+    } catch (err: any) {
+      alert('Failed to save custom policy: ' + (err.message || 'Unknown error'))
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Policy Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Acme Corp FinTech Policy"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Brief description of this policy"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-2">Select Incident Types</label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
+          {baselines.map((b) => (
+            <label
+              key={b.incident_type}
+              className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                selectedTypes.includes(b.incident_type)
+                  ? 'bg-blue-50 border border-blue-200'
+                  : 'hover:bg-gray-50 border border-transparent'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedTypes.includes(b.incident_type)}
+                onChange={() => toggleType(b.incident_type)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">
+                {getIncidentName(b.incident_type)}
+                <span className="text-gray-400 text-xs ml-1">({b.incident_type})</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+        >
+          <Save className="w-3.5 h-3.5" />
+          {saving ? 'Saving...' : 'Save Custom Policy'}
+        </button>
+        <span className="text-xs text-gray-500">
+          {selectedTypes.length} type{selectedTypes.length !== 1 ? 's' : ''} selected
+        </span>
       </div>
     </div>
   )

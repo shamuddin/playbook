@@ -26,11 +26,18 @@ async def list_agents(
     sort_by: str = Query("last_seen", description="Sort field"),
     sort_order: str = Query("desc", description="Sort direction: asc or desc"),
     q: Optional[str] = Query(None, description="Free-text search"),
+    include_unregistered: bool = Query(True, description="Include agents that appear in incidents but have no Agent record"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse:
-    """List all monitored agents with filtering and pagination."""
+    """List all monitored agents with filtering and pagination.
+
+    Incident counts are computed dynamically from the Incident table so they
+    always reflect reality, even for agents registered after incidents were
+    created or for unregistered agents that appear in incident data.
+    """
+    # --- Build registered-agent query ---
     query = select(Agent)
 
     # Exclude known demo agents
@@ -40,9 +47,6 @@ async def list_agents(
         not_(Agent.system_id.like("demo-%")),
     )
 
-    if type:
-        # Agent model doesn't have a type column; filter by name pattern for now
-        pass
     if health_min is not None:
         query = query.where(Agent.health_score >= health_min)
     if health_max is not None:
@@ -59,15 +63,40 @@ async def list_agents(
     else:
         query = query.order_by(sort_field.asc())
 
-    # Count total
-    count_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = count_result.scalar()
-
     # Pagination
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     agents = result.scalars().all()
 
+    # --- Compute incident counts dynamically ---
+    agent_system_ids = [a.system_id for a in agents]
+    incident_counts: dict[str, int] = {}
+    bypass_counts: dict[str, int] = {}
+    judge_counts: dict[str, int] = {}
+
+    if agent_system_ids:
+        # Incident counts by agent_id
+        inc_result = await db.execute(
+            select(Incident.agent_id, func.count(Incident.id))
+            .where(Incident.agent_id.in_(agent_system_ids))
+            .group_by(Incident.agent_id)
+        )
+        for row in inc_result.all():
+            incident_counts[row[0]] = row[1]
+
+        # Bypass counts by agent_id (via event_id fallback for older records)
+        bp_result = await db.execute(
+            select(Incident.agent_id, func.count(Incident.id))
+            .where(
+                Incident.agent_id.in_(agent_system_ids),
+                Incident.bypass_detected == True,
+            )
+            .group_by(Incident.agent_id)
+        )
+        for row in bp_result.all():
+            bypass_counts[row[0]] = row[1]
+
+    # --- Build registered agent items ---
     def _agent_status(agent: Agent) -> str:
         if agent.status == "offline":
             return "offline"
@@ -79,34 +108,73 @@ async def list_agents(
             return "degraded"
         return "critical"
 
-    def _agent_dict(agent: Agent) -> dict:
-        return {
+    items = []
+    for agent in agents:
+        inc_count = incident_counts.get(agent.system_id, 0)
+        bp_count = bypass_counts.get(agent.system_id, 0)
+        items.append({
             "id": agent.id,
             "system_id": agent.system_id,
             "name": agent.name,
             "description": agent.description,
             "health_score": agent.health_score,
             "lie_rate": agent.lie_rate,
-            "incident_count": agent.incident_count,
-            "bypass_attempt_count": agent.bypass_attempt_count,
+            "incident_count": inc_count,
+            "bypass_attempt_count": bp_count,
             "judge_decision_count": agent.judge_decision_count,
-            "judge_decision_rate": round(agent.judge_decision_count / max(agent.incident_count, 1), 3),
+            "judge_decision_rate": round(agent.judge_decision_count / max(inc_count, 1), 3),
             "suprawall_connected": agent.suprawall_connected,
             "is_active": agent.is_active,
             "status": _agent_status(agent),
             "last_seen": agent.updated_at.isoformat() if agent.updated_at else None,
             "created_at": agent.created_at.isoformat() if agent.created_at else None,
             "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
-        }
+        })
+
+    # --- Include unregistered agents (appear in incidents but no Agent record) ---
+    total = len(items)
+    if include_unregistered:
+        # Find distinct agent_ids in incidents that are NOT in Agent table
+        unreg_result = await db.execute(
+            select(Incident.agent_id, func.count(Incident.id))
+            .where(
+                Incident.agent_id != None,
+                Incident.agent_id.not_in(agent_system_ids) if agent_system_ids else True,
+            )
+            .group_by(Incident.agent_id)
+            .order_by(func.count(Incident.id).desc())
+        )
+        for row in unreg_result.all():
+            agent_id, inc_count = row
+            if agent_id and inc_count:
+                items.append({
+                    "id": f"unreg-{agent_id}",
+                    "system_id": agent_id,
+                    "name": agent_id,
+                    "description": "Agent seen in incidents but not registered in fleet",
+                    "health_score": 50,
+                    "lie_rate": 0.0,
+                    "incident_count": inc_count,
+                    "bypass_attempt_count": 0,
+                    "judge_decision_count": 0,
+                    "judge_decision_rate": 0.0,
+                    "suprawall_connected": False,
+                    "is_active": True,
+                    "status": "degraded",
+                    "last_seen": None,
+                    "created_at": None,
+                    "updated_at": None,
+                })
+                total += 1
 
     return StandardResponse(
         data={
-            "items": [_agent_dict(agent) for agent in agents],
+            "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,
         },
-        message=f"Found {len(agents)} agents",
+        message=f"Found {len(items)} agents",
     )
 
 
@@ -125,9 +193,9 @@ async def get_agent(
             detail=f"Agent {agent_id} not found",
         )
 
-    # Get incident stats for this agent
+    # Get incident stats for this agent (match by agent_id, not event_id)
     incident_result = await db.execute(
-        select(func.count(Incident.id)).where(Incident.event_id == agent.system_id)
+        select(func.count(Incident.id)).where(Incident.agent_id == agent.system_id)
     )
     incident_count = incident_result.scalar() or 0
 
@@ -171,12 +239,25 @@ async def get_agent_health(
             detail=f"Agent {agent_id} not found",
         )
 
+    # Compute dynamic incident count
+    incident_result = await db.execute(
+        select(func.count(Incident.id)).where(Incident.agent_id == agent.system_id)
+    )
+    incident_count = incident_result.scalar() or 0
+
+    bypass_result = await db.execute(
+        select(func.count(Incident.id)).where(
+            (Incident.agent_id == agent.system_id) & (Incident.bypass_detected == True)
+        )
+    )
+    bypass_count = bypass_result.scalar() or 0
+
     # Compute risk score based on incident history
     risk_score = max(
         0,
         100
-        - (agent.incident_count * 5)
-        - (agent.bypass_attempt_count * 25)
+        - (incident_count * 5)
+        - (bypass_count * 25)
         - int(agent.lie_rate * 100),
     )
 
@@ -189,9 +270,9 @@ async def get_agent_health(
         status_str = "critical"
 
     # Component breakdown
-    availability = max(0, 100 - (agent.incident_count * 3))
+    availability = max(0, 100 - (incident_count * 3))
     response_quality = max(0, 100 - int(agent.lie_rate * 100))
-    compliance = max(0, 100 - (agent.bypass_attempt_count * 20))
+    compliance = max(0, 100 - (bypass_count * 20))
 
     return StandardResponse(
         data={
@@ -201,10 +282,10 @@ async def get_agent_health(
             "risk_score": risk_score,
             "lie_rate": agent.lie_rate,
             "status": status_str,
-            "incident_count": agent.incident_count,
-            "bypass_attempt_count": agent.bypass_attempt_count,
+            "incident_count": incident_count,
+            "bypass_attempt_count": bypass_count,
             "judge_decision_count": agent.judge_decision_count,
-            "judge_decision_rate": round(agent.judge_decision_count / max(agent.incident_count, 1), 3),
+            "judge_decision_rate": round(agent.judge_decision_count / max(incident_count, 1), 3),
             "components": {
                 "availability": availability,
                 "response_quality": response_quality,

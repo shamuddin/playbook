@@ -5,8 +5,8 @@
  * changes made on the Settings page actually take effect.
  */
 
-const DEFAULT_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001/api/v1'
-const DEFAULT_WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8001/ws/incidents'
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8003/api/v1'
+const DEFAULT_WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8003/api/v1/ws/incidents'
 
 export function getApiBase(): string {
   try {

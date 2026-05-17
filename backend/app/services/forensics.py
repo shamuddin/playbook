@@ -6,6 +6,7 @@ and HMAC-SHA256 digital signature.
 
 import hashlib
 import hmac
+import html
 import io
 import json
 import uuid
@@ -33,8 +34,8 @@ settings = get_settings()
 
 
 def _generate_package_id(incident_id: str) -> str:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")[:-3]
-    return f"EVIDENCE-{incident_id}-{ts}"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"EVID-{incident_id[:20]}-{ts}"
 
 
 def _sha256_dict(data: Dict[str, Any]) -> str:
@@ -393,7 +394,7 @@ class ForensicsService:
             package_data=package_data,
             integrity_hash=package_hash,
             is_verified=True,
-            retention_until=datetime.now(timezone.utc) + timedelta(days=2555),
+            retention_until=(datetime.now(timezone.utc) + timedelta(days=2555)).replace(tzinfo=None),
         )
         db.add(evidence)
         await db.flush()
@@ -605,13 +606,13 @@ th {{ background-color: #f5f5f5; font-weight: bold; }}
 <body>
 <h1>🔒 PLAYBOOK Evidence Package</h1>
 <table>
-<tr><th>Package ID</th><td>{evidence.package_id}</td></tr>
-<tr><th>Incident ID</th><td>{incident.get('incident_id', 'N/A')}</td></tr>
-<tr><th>Type</th><td>{incident.get('incident_type', 'N/A')}</td></tr>
-<tr><th>Severity</th><td class="severity-{incident.get('severity', 'unknown')}">{incident.get('severity', 'N/A').upper()}</td></tr>
-<tr><th>Status</th><td>{incident.get('status', 'N/A')}</td></tr>
+<tr><th>Package ID</th><td>{html.escape(str(evidence.package_id))}</td></tr>
+<tr><th>Incident ID</th><td>{html.escape(str(incident.get('incident_id', 'N/A')))}</td></tr>
+<tr><th>Type</th><td>{html.escape(str(incident.get('incident_type', 'N/A')))}</td></tr>
+<tr><th>Severity</th><td class="severity-{html.escape(str(incident.get('severity', 'unknown')))}">{html.escape(str(incident.get('severity', 'N/A')).upper())}</td></tr>
+<tr><th>Status</th><td>{html.escape(str(incident.get('status', 'N/A')))}</td></tr>
 <tr><th>Generated</th><td>{evidence.created_at.isoformat() if evidence.created_at else 'N/A'}</td></tr>
-<tr><th>Integrity Hash</th><td><code>{evidence.integrity_hash or 'N/A'}</code></td></tr>
+<tr><th>Integrity Hash</th><td><code>{html.escape(str(evidence.integrity_hash)) if evidence.integrity_hash else 'N/A'}</code></td></tr>
 <tr><th>Verified</th><td>{'✅ Yes' if evidence.is_verified else '❌ No'}</td></tr>
 </table>
 
@@ -625,47 +626,47 @@ th {{ background-color: #f5f5f5; font-weight: bold; }}
         if timeline:
             html += "<h2>📅 Timeline</h2><table><tr><th>Timestamp</th><th>Stage</th><th>Event</th><th>Source</th></tr>"
             for evt in timeline:
-                html += f"<tr><td>{evt.get('timestamp', 'N/A')}</td><td>{evt.get('stage', 'N/A')}</td><td>{evt.get('event_type', 'N/A')}</td><td>{evt.get('source_component', 'N/A')}</td></tr>"
+                html += f"<tr><td>{html.escape(str(evt.get('timestamp', 'N/A')))}</td><td>{html.escape(str(evt.get('stage', 'N/A')))}</td><td>{html.escape(str(evt.get('event_type', 'N/A')))}</td><td>{html.escape(str(evt.get('source_component', 'N/A')))}</td></tr>"
             html += "</table>"
 
         if judge:
             html += "<h2>⚖️ Judge Decisions</h2><table><tr><th>Verdict</th><th>Severity Score</th><th>Confidence</th><th>Rationale</th></tr>"
             for d in judge:
-                html += f"<tr><td>{d.get('verdict', 'N/A')}</td><td>{d.get('severity_score', 'N/A')}</td><td>{d.get('confidence', 'N/A')}</td><td>{d.get('rationale', 'N/A')[:200]}...</td></tr>"
+                html += f"<tr><td>{html.escape(str(d.get('verdict', 'N/A')))}</td><td>{html.escape(str(d.get('severity_score', 'N/A')))}</td><td>{html.escape(str(d.get('confidence', 'N/A')))}</td><td>{html.escape(str(d.get('rationale', 'N/A'))[:200])}...</td></tr>"
             html += "</table>"
 
         if response:
             html += f"""
 <h2>🛡️ Response</h2>
 <table>
-<tr><th>Response ID</th><td>{response.get('response_id', 'N/A')}</td></tr>
-<tr><th>Playbook</th><td>{response.get('playbook_id', 'N/A')}</td></tr>
-<tr><th>Status</th><td>{response.get('status', 'N/A')}</td></tr>
-<tr><th>Steps</th><td>{response.get('steps_completed', 0)}/{response.get('steps_total', 0)}</td></tr>
+<tr><th>Response ID</th><td>{html.escape(str(response.get('response_id', 'N/A')))}</td></tr>
+<tr><th>Playbook</th><td>{html.escape(str(response.get('playbook_id', 'N/A')))}</td></tr>
+<tr><th>Status</th><td>{html.escape(str(response.get('status', 'N/A')))}</td></tr>
+<tr><th>Steps</th><td>{html.escape(str(response.get('steps_completed', 0)))}/{html.escape(str(response.get('steps_total', 0)))}</td></tr>
 </table>
 """
             steps = response.get("steps", [])
             if steps:
                 html += "<table><tr><th>Step</th><th>Action</th><th>Status</th></tr>"
                 for s in steps:
-                    html += f"<tr><td>{s.get('step_name', 'N/A')}</td><td>{s.get('action', 'N/A')}</td><td>{s.get('status', 'N/A')}</td></tr>"
+                    html += f"<tr><td>{html.escape(str(s.get('step_name', 'N/A')))}</td><td>{html.escape(str(s.get('action', 'N/A')))}</td><td>{html.escape(str(s.get('status', 'N/A')))}</td></tr>"
                 html += "</table>"
 
         if bypass:
             html += "<h2>🚫 Bypass Attempts</h2><table><tr><th>Pattern</th><th>Confidence</th><th>Blocked At</th></tr>"
             for bp in bypass:
-                html += f"<tr><td>{bp.get('pattern_id', 'N/A')}</td><td>{bp.get('detection_confidence', 'N/A')}</td><td>{bp.get('blocked_at', 'N/A')}</td></tr>"
+                html += f"<tr><td>{html.escape(str(bp.get('pattern_id', 'N/A')))}</td><td>{html.escape(str(bp.get('detection_confidence', 'N/A')))}</td><td>{html.escape(str(bp.get('blocked_at', 'N/A')))}</td></tr>"
             html += "</table>"
 
         if audit:
             html += "<h2>📜 Audit Log</h2><table><tr><th>Action</th><th>Actor</th><th>Target</th><th>Time</th></tr>"
             for a in audit:
-                html += f"<tr><td>{a.get('action', 'N/A')}</td><td>{a.get('actor_type', 'N/A')}</td><td>{a.get('target_type', 'N/A')}</td><td>{a.get('created_at', 'N/A')}</td></tr>"
+                html += f"<tr><td>{html.escape(str(a.get('action', 'N/A')))}</td><td>{html.escape(str(a.get('actor_type', 'N/A')))}</td><td>{html.escape(str(a.get('target_type', 'N/A')))}</td><td>{html.escape(str(a.get('created_at', 'N/A')))}</td></tr>"
             html += "</table>"
 
         html += f"""
 <div class="footer">
-<p>Generated by PLAYBOOK Forensics Service | Package ID: {evidence.package_id}</p>
+<p>Generated by PLAYBOOK Forensics Service | Package ID: {html.escape(str(evidence.package_id))}</p>
 <p>Retention until: {evidence.retention_until.isoformat() if evidence.retention_until else 'N/A'}</p>
 </div>
 </body>

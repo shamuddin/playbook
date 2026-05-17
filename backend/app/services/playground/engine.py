@@ -22,9 +22,11 @@ from typing import Any, Callable, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import INCIDENT_TYPES
 from app.database import AsyncSessionLocal
 from app.models import (
     Agent,
+    JudgeDecision,
     PlaygroundAgent,
     PlaygroundEvent,
     PlaygroundEventType,
@@ -64,6 +66,7 @@ class SimulatedAgent:
     last_thought: str = ""
     last_action: str = ""
     last_verdict: str = ""
+    last_verdict_data: dict = field(default_factory=dict)
 
 
 def _build_llm_prompt(system_prompt: str, situation: str, actions: list[AgentAction]) -> str:
@@ -151,13 +154,14 @@ async def _call_judge_layer(
 class PlaygroundEngine:
     """Orchestrates one or more simulated agents."""
 
-    def __init__(self, session_id: str, handoff_chain: Optional[list[str]] = None):
+    def __init__(self, session_id: str, handoff_chain: Optional[list[str]] = None, misbehavior_mode: bool = False):
         self.session_id = session_id
         self.agents: list[SimulatedAgent] = []
         self.running = False
         self._tasks: list[asyncio.Task] = []
         self._stop_event = asyncio.Event()
         self.handoff_chain: list[str] = handoff_chain or []
+        self.misbehavior_mode = misbehavior_mode
 
         # Human-in-the-loop state
         self.awaiting_human_approval: Optional[dict] = None
@@ -204,10 +208,12 @@ class PlaygroundEngine:
             )
 
         # Mirror playground agents into the main Agent table for health-page visibility
+        # Use a scoped system_id so each session gets its own Agent records
         async with AsyncSessionLocal() as agent_db:
             for sim_agent in self.agents:
+                scoped_id = f"pg-{self.session_id[:8]}-{sim_agent.name}"
                 result = await agent_db.execute(
-                    select(Agent).where(Agent.system_id == sim_agent.name)
+                    select(Agent).where(Agent.system_id == scoped_id)
                 )
                 agent_record = result.scalar_one_or_none()
                 if agent_record:
@@ -219,8 +225,9 @@ class PlaygroundEngine:
                     agent_record.name = sim_agent.name
                 else:
                     agent_record = Agent(
-                        system_id=sim_agent.name,
+                        system_id=scoped_id,
                         name=sim_agent.name,
+                        description=f"Playground agent ({self.session_id[:8]})",
                         status="online",
                         health_score=100,
                         is_active=True,
@@ -252,8 +259,9 @@ class PlaygroundEngine:
             if agent.is_active:
                 await ws_manager.broadcast({
                     "event_type": "agent_status_updated",
-                    "agent_id": agent.name,
-                    "system_id": agent.name,
+                    "agent_id": f"pg-{self.session_id[:8]}-{agent.name}",
+                    "system_id": f"pg-{self.session_id[:8]}-{agent.name}",
+                    "agent_name": agent.name,
                     "status": "online",
                     "health_score": 100,
                 })
@@ -272,8 +280,9 @@ class PlaygroundEngine:
         # Mark mirrored Agent records as offline
         async with AsyncSessionLocal() as agent_db:
             for sim_agent in self.agents:
+                scoped_id = f"pg-{self.session_id[:8]}-{sim_agent.name}"
                 result = await agent_db.execute(
-                    select(Agent).where(Agent.system_id == sim_agent.name)
+                    select(Agent).where(Agent.system_id == scoped_id)
                 )
                 agent_record = result.scalar_one_or_none()
                 if agent_record:
@@ -283,8 +292,9 @@ class PlaygroundEngine:
         for agent in self.agents:
             await ws_manager.broadcast({
                 "event_type": "agent_status_updated",
-                "agent_id": agent.name,
-                "system_id": agent.name,
+                "agent_id": f"pg-{self.session_id[:8]}-{agent.name}",
+                "system_id": f"pg-{self.session_id[:8]}-{agent.name}",
+                "agent_name": agent.name,
                 "status": "offline",
                 "health_score": 0,
             })
@@ -453,60 +463,89 @@ class PlaygroundEngine:
             agent_name=agent.name,
         )
 
-        # 2) Call LLM for decision
-        prompt = _build_llm_prompt(agent.system_prompt, situation, agent.actions)
-        llm_resp = await provider.chat_completion(
-            system_prompt=agent.system_prompt,
-            messages=[{"role": "user", "content": situation}],
-            json_mode=True,
-            temperature=0.7,
-        )
+        # 2) Call LLM for decision — unless misbehavior mode forces a malicious action
+        action_name = ""
+        reasoning = ""
+        confidence = 0.5
+        llm_resp = None
 
-        if llm_resp.error:
-            await self._emit_event(
-                PlaygroundEventType.ERROR,
-                {"error": llm_resp.error, "provider": llm_resp.provider},
-                agent_id=agent.id,
-                agent_name=agent.name,
+        malicious_actions = [a for a in agent.actions if a.is_malicious]
+        if self.misbehavior_mode and malicious_actions and random.random() < 0.70:
+            # Force malicious action for demo realism
+            chosen = random.choice(malicious_actions)
+            action_name = chosen.name
+            reasoning = (
+                f"[MISBEHAVIOR] Agent {agent.name} deliberately chose '{action_name}' "
+                f"despite policy constraints. Simulated insider threat / compromised-agent scenario."
             )
-            # Fallback: pick random action
-            action_name = random.choice([a.name for a in agent.actions]) if agent.actions else "noop"
-            reasoning = f"[FALLBACK] LLM error: {llm_resp.error}. Defaulting to {action_name}."
-            confidence = 0.0
-        else:
-            structured = llm_resp.structured or {}
-            action_name = structured.get("action", "")
-            reasoning = structured.get("reasoning", "No reasoning provided.")
-            confidence = float(structured.get("confidence", 0.5))
-
-            # Validate action exists
-            valid_names = {a.name for a in agent.actions}
-            if action_name not in valid_names:
-                choices = [a.name for a in agent.actions]
-                print(f"[DEBUG] choices={choices} random={random.choice(choices) if choices else 'noop'}")
-                fallback = random.choice(choices) if choices else "noop"
-                await self._emit_event(
-                    PlaygroundEventType.ERROR,
-                    {"error": f"LLM chose unknown action '{action_name}', falling back to {fallback}"},
-                    agent_id=agent.id,
-                    agent_name=agent.name,
-                )
-                action_name = fallback
-
-            agent.last_thought = reasoning
+            confidence = 0.92
             await self._emit_event(
                 PlaygroundEventType.LLM_RESPONSE,
                 {
                     "reasoning": reasoning,
                     "confidence": confidence,
                     "chosen_action": action_name,
-                    "provider": llm_resp.provider,
-                    "model": llm_resp.model,
-                    "latency_ms": round(llm_resp.latency_ms, 2),
+                    "provider": "chaos_mode",
+                    "model": "misbehavior_injected",
+                    "latency_ms": 0.0,
                 },
                 agent_id=agent.id,
                 agent_name=agent.name,
             )
+        else:
+            prompt = _build_llm_prompt(agent.system_prompt, situation, agent.actions)
+            llm_resp = await provider.chat_completion(
+                system_prompt=agent.system_prompt,
+                messages=[{"role": "user", "content": situation}],
+                json_mode=True,
+                temperature=0.7,
+            )
+
+            if llm_resp.error:
+                await self._emit_event(
+                    PlaygroundEventType.ERROR,
+                    {"error": llm_resp.error, "provider": llm_resp.provider},
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                )
+                # Fallback: pick random action
+                action_name = random.choice([a.name for a in agent.actions]) if agent.actions else "noop"
+                reasoning = f"[FALLBACK] LLM error: {llm_resp.error}. Defaulting to {action_name}."
+                confidence = 0.0
+            else:
+                structured = llm_resp.structured or {}
+                action_name = structured.get("action", "")
+                reasoning = structured.get("reasoning", "No reasoning provided.")
+                confidence = float(structured.get("confidence", 0.5))
+
+                # Validate action exists
+                valid_names = {a.name for a in agent.actions}
+                if action_name not in valid_names:
+                    choices = [a.name for a in agent.actions]
+                    print(f"[DEBUG] choices={choices} random={random.choice(choices) if choices else 'noop'}")
+                    fallback = random.choice(choices) if choices else "noop"
+                    await self._emit_event(
+                        PlaygroundEventType.ERROR,
+                        {"error": f"LLM chose unknown action '{action_name}', falling back to {fallback}"},
+                        agent_id=agent.id,
+                        agent_name=agent.name,
+                    )
+                    action_name = fallback
+
+                agent.last_thought = reasoning
+                await self._emit_event(
+                    PlaygroundEventType.LLM_RESPONSE,
+                    {
+                        "reasoning": reasoning,
+                        "confidence": confidence,
+                        "chosen_action": action_name,
+                        "provider": llm_resp.provider,
+                        "model": llm_resp.model,
+                        "latency_ms": round(llm_resp.latency_ms, 2),
+                    },
+                    agent_id=agent.id,
+                    agent_name=agent.name,
+                )
 
         # 3) Build metadata for guard
         action_obj = next((a for a in agent.actions if a.name == action_name), None)
@@ -541,6 +580,7 @@ class PlaygroundEngine:
             metadata=agent.current_metadata,
         )
         agent.last_verdict = verdict.get("verdict", "ESCALATE")
+        agent.last_verdict_data = verdict
 
         await self._emit_event(
             PlaygroundEventType.JUDGE_VERDICT,
@@ -623,9 +663,10 @@ class PlaygroundEngine:
         # Status update broadcast moved to the unified block below
 
         # Update mirrored Agent record with tick results
+        scoped_id = f"pg-{self.session_id[:8]}-{agent.name}"
         async with AsyncSessionLocal() as agent_db:
             result = await agent_db.execute(
-                select(Agent).where(Agent.system_id == agent.name)
+                select(Agent).where(Agent.system_id == scoped_id)
             )
             agent_record = result.scalar_one_or_none()
             if agent_record:
@@ -657,8 +698,9 @@ class PlaygroundEngine:
                 # Broadcast unified status update with standard status labels
                 await ws_manager.broadcast({
                     "event_type": "agent_status_updated",
-                    "agent_id": agent.name,
-                    "system_id": agent.name,
+                    "agent_id": scoped_id,
+                    "system_id": scoped_id,
+                    "agent_name": agent.name,
                     "status": agent_record.status,
                     "health_score": hs,
                 })
@@ -682,7 +724,8 @@ class PlaygroundEngine:
                     "event_id": str(uuid.uuid4()),
                     "timestamp": time.time(),
                     "source": "playground",
-                    "source_agent_id": agent.name,
+                    "agent_id": agent.name,
+                    "session_id": self.session_id,
                     "action_type": action_name,
                     "metadata": metadata,
                 },
@@ -691,8 +734,57 @@ class PlaygroundEngine:
 
             detection = DetectionEngine().evaluate(normalized_event)
 
+            # Override detection with playground metadata when available
+            meta_type = metadata.get("incident_type")
+            if meta_type and meta_type in INCIDENT_TYPES:
+                detection.incident_type = meta_type
+                detection.incident_type_name = INCIDENT_TYPES[meta_type]
+                detection.severity = metadata.get("severity", detection.severity)
+                detection.confidence = metadata.get("confidence", detection.confidence)
+                detection.anomaly_score = min(detection.confidence * 100, 100.0)
+                detection.deterministic = True
+                prefix = meta_type.rsplit("-", 1)[0] if "-" in meta_type else meta_type
+                detection.category = {
+                    "AGT-DEL": "integrity",
+                    "AGT-FIN": "financial",
+                    "AGT-PER": "access",
+                    "AGT-HRM": "safety",
+                    "AGT-EXT": "exfiltration",
+                    "AGT-INJ": "injection",
+                    "AGT-HAL": "reliability",
+                    "AGT-CRE": "secrets",
+                    "AGT-RAT": "availability",
+                    "AGT-DRF": "model",
+                    "AGT-TLM": "misuse",
+                    "AGT-GAP": "coverage",
+                    "AGT-SPY": "reconnaissance",
+                    "AGT-BYP": "bypass",
+                    "AGT-PRV": "privacy",
+                    "AGT-REG": "compliance",
+                }.get(prefix, "unknown")
+
             async with AsyncSessionLocal() as db:
                 incident = await IncidentFactory.create_incident(db, normalized_event, detection)
+                await db.flush()
+
+                # Create JudgeDecision record and link to incident
+                vdata = agent.last_verdict_data or {}
+                if vdata.get("verdict"):
+                    decision = JudgeDecision(
+                        decision_id=f"JDG-{uuid.uuid4().hex[:12].upper()}",
+                        incident_id=incident.id,
+                        agent_id=agent.name,
+                        verdict=vdata.get("verdict", "ESCALATE"),
+                        severity_score=vdata.get("severity_score", 0),
+                        confidence=vdata.get("confidence", 1.0),
+                        matched_rules=vdata.get("matched_rules", []),
+                        bypass_patterns_detected=vdata.get("bypass_patterns_detected", []),
+                        rationale=vdata.get("rationale", ""),
+                        latency_ms=vdata.get("latency_ms", 0.0),
+                    )
+                    db.add(decision)
+                    await db.flush()
+                    incident.judge_decision_id = decision.id
                 await db.commit()
 
             await ws_manager.broadcast({
@@ -704,6 +796,48 @@ class PlaygroundEngine:
                 "confidence": incident.confidence,
                 "timestamp": incident.created_at.isoformat(),
             })
+
+            # In-app notification + email alert
+            await ws_manager.broadcast({
+                "event_type": "notification",
+                "notification_type": "incident",
+                "title": f"Playbook Alert: {incident.incident_type}",
+                "message": (
+                    f"Agent {agent.name} triggered {incident.incident_type} "
+                    f"({incident.severity}) in session {self.session_id[:8]}."
+                ),
+                "severity": incident.severity,
+                "incident_id": incident.incident_id,
+                "agent_name": agent.name,
+                "session_id": self.session_id,
+                "created_at": incident.created_at.isoformat(),
+            })
+
+            # Send email alert asynchronously (fail-open)
+            async def _send_email_alert():
+                try:
+                    from app.services.notification_service import NotificationService
+                    service = NotificationService()
+                    msg = {
+                        "title": f"PLAYBOOK Alert: {incident.severity.upper()} {incident.incident_type}",
+                        "body": (
+                            f"Incident: {incident.incident_id}\n"
+                            f"Agent: {agent.name}\n"
+                            f"Session: {self.session_id[:8]}\n"
+                            f"Severity: {incident.severity}\n"
+                            f"Category: {incident.category}\n"
+                            f"Confidence: {incident.confidence:.2f}\n"
+                            f"Action: {action_name}"
+                        ),
+                        "severity": incident.severity,
+                        "incident_id": incident.incident_id,
+                    }
+                    await service.send("email", msg)
+                    await service.close()
+                except Exception:
+                    pass
+
+            asyncio.create_task(_send_email_alert())
 
             await self._emit_event(
                 PlaygroundEventType.INCIDENT_CREATED,
@@ -765,7 +899,10 @@ class PlaygroundEngine:
             except Exception:
                 pass
 
-        asyncio.create_task(_persist())
+        task = asyncio.create_task(_persist())
+        task.add_done_callback(
+            lambda t: print(f"[playground] Persist task error: {t.exception()}") if t.done() and t.exception() else None
+        )
 
 
 # Global engine registry (one engine per session)

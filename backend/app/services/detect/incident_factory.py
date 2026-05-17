@@ -82,6 +82,8 @@ class IncidentFactory:
             response_status="pending",
             forensics_status="pending",
             bypass_detected=detection.category == "bypass",
+            agent_id=event.agent_id,
+            swarm_id=event.session_id,
         )
         db.add(incident)
         await db.flush()  # Get the ID assigned

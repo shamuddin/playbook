@@ -3,10 +3,6 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import Header from './Header'
 
-vi.mock('./ThemeProvider', () => ({
-  useTheme: () => ({ theme: 'light', toggleTheme: vi.fn() }),
-}))
-
 vi.mock('./AuthProvider', () => ({
   useAuth: () => ({ user: { full_name: 'Admin' }, logout: vi.fn() }),
 }))

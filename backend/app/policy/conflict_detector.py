@@ -252,8 +252,8 @@ class ConflictDetector:
             # Just mark resolved without changing value
             conflict.status = "resolved"
             conflict.resolved_by = "system"
-            from datetime import datetime, timezone
-            conflict.resolved_at = datetime.now(timezone.utc)
+            from app.models import utc_now
+            conflict.resolved_at = utc_now()
             return False
 
         # Find and update the ODP if possible
@@ -269,5 +269,6 @@ class ConflictDetector:
         conflict.status = "resolved"
         conflict.resolved_by = "system"
         from datetime import datetime, timezone
-        conflict.resolved_at = datetime.now(timezone.utc)
+        from app.models import utc_now
+        conflict.resolved_at = utc_now()
         return updated

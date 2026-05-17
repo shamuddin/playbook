@@ -2,7 +2,7 @@
 
 This directory contains custom Claude Code skills and agent role definitions for the PLAYBOOK project.
 
-## Skills (13)
+## Skills (19)
 
 Located in `.claude/skills/`. Invoke with `/skill-name`.
 
@@ -21,8 +21,14 @@ Located in `.claude/skills/`. Invoke with `/skill-name`.
 | `seed-and-verify` | Seed DB and verify all tables are populated |
 | `deploy-local` | Start the full local development stack (backend + frontend + DB) |
 | `websocket-test` | Test WebSocket connectivity and real-time incident streaming |
+| `load-test` | Benchmark detection/judge/forensics latency SLOs under load |
+| `red-team-test` | Run adversarial bypass tests and measure escape rates |
+| `llm-observability` | Audit Gemini overlay metrics, retry logic, and cache health |
+| `db-optimize` | Analyze hot queries, validate indexes, and check migration safety |
+| `resilience-test` | Inject failures and verify graceful degradation |
+| `a11y-check` | Run WCAG 2.1 AA accessibility audits on the React frontend |
 
-## Agents (24)
+## Agents (30)
 
 Located in `.claude/agents/`. Reference these prompts when spawning parallel `Agent` tool calls.
 
@@ -64,6 +70,16 @@ Located in `.claude/agents/`. Reference these prompts when spawning parallel `Ag
 | **gemini-agent** | LLM reasoning overlay/cache | `backend/app/services/gemini_reasoning.py`, `backend/app/routers/gemini.py` |
 | **lobstertrap-agent** | DPI/proxy/log ingestion | `backend/app/services/lobstertrap_integration.py` |
 
+### Expert Specialists
+| Agent | Specialty | Key Files |
+|-------|-----------|-----------|
+| **performance-sre-agent** | Latency SLOs, load testing, profiling | `backend/app/core/constants.py`, `backend/app/services/detect/engine.py`, `backend/app/judge/engine.py` |
+| **red-team-agent** | Adversarial bypass research, fuzzing, escape-rate analysis | `backend/app/judge/bypass_detector.py`, `backend/tests/unit/test_bypass_detection.py` |
+| **llm-ops-agent** | LLM observability, cost tracking, circuit breakers | `backend/app/services/gemini_reasoning.py`, `backend/app/services/gemini_cache.py` |
+| **dbre-agent** | Query optimization, index tuning, migration safety | `backend/app/models.py`, `backend/app/database.py`, `backend/alembic/versions/` |
+| **chaos-agent** | Failure injection, graceful degradation, resilience | `backend/app/main.py`, `docker-compose.yml`, `backend/app/services/websocket_manager.py` |
+| **a11y-agent** | WCAG 2.1 AA audits, keyboard navigation, ARIA | `frontend/src/pages/`, `frontend/src/components/`, Tailwind config |
+
 ### Support
 | Agent | Specialty | Key Files |
 |-------|-----------|-----------|
@@ -83,6 +99,12 @@ Located in `.claude/agents/`. Reference these prompts when spawning parallel `Ag
 /seed-and-verify
 /deploy-local
 /websocket-test
+/load-test
+/red-team-test
+/llm-observability
+/db-optimize
+/resilience-test
+/a11y-check
 ```
 
 ### Spawning Parallel Agents
@@ -115,7 +137,7 @@ For maximum throughput on large tasks:
 - backend-agent + frontend-agent + test-agent (parallel)
 
 **Security Hardening:**
-- security-agent + auth-agent + judge-agent + bypass-test (parallel)
+- security-agent + auth-agent + judge-agent + red-team-test (parallel)
 
 **Database Changes:**
 - database-agent + backend-agent + test-agent (sequential: DB first)
@@ -128,3 +150,15 @@ For maximum throughput on large tasks:
 
 **Release Prep:**
 - full-check + security-scan + compliance-check + test-agent (parallel)
+
+**Performance Hardening:**
+- performance-sre-agent + dbre-agent + load-test + db-optimize (parallel)
+
+**Adversarial Validation:**
+- red-team-agent + judge-agent + security-agent + red-team-test (parallel)
+
+**Production Observability:**
+- llm-ops-agent + chaos-agent + llm-observability + resilience-test (parallel)
+
+**Accessibility Sprint:**
+- a11y-agent + ui-ux-agent + frontend-agent + a11y-check (parallel)

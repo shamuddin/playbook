@@ -39,6 +39,8 @@ interface SummaryData {
   avg_response_time_minutes: number
   judge_decisions_period: number
   agent_health_distribution: Record<string, number>
+  agent_breakdown: Record<string, number>
+  swarm_breakdown: Record<string, number>
 }
 
 interface TrendData {
@@ -50,9 +52,16 @@ interface TrendData {
 }
 
 export default function AnalyticsPage() {
+  const chartGrid = '#E5E7EB'
+  const chartAxis = '#6B7280'
+  const chartTooltipBg = '#FFFFFF'
+  const chartTooltipBorder = '#E5E7EB'
+  const chartLabel = '#111827'
+
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [trends, setTrends] = useState<TrendData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [period, setPeriod] = useState('7d')
 
   useEffect(() => {
@@ -61,23 +70,50 @@ export default function AnalyticsPage() {
 
   const loadAnalytics = async () => {
     setLoading(true)
+    setError(false)
     try {
       const [sumRes, trendRes] = await Promise.all([
         apiFetch(`${API_BASE}/dashboard/analytics/summary?period=${period}`),
         apiFetch(`${API_BASE}/dashboard/analytics/trends?period=${period}&granularity=daily`),
       ])
-      if (sumRes.ok) setSummary((await sumRes.json()).data || null)
-      if (trendRes.ok) setTrends((await trendRes.json()).data || null)
+      if (sumRes.ok) {
+        setSummary((await sumRes.json()).data || null)
+      } else {
+        setError(true)
+      }
+      if (trendRes.ok) {
+        setTrends((await trendRes.json()).data || null)
+      } else {
+        setError(true)
+      }
     } catch {
-      // ignore
+      setError(true)
     }
     setLoading(false)
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <BarChart3 className="w-6 h-6 text-blue-600" />
+            Analytics
+          </h1>
+          <div className="h-8 w-32 bg-gray-200 rounded animate-pulse" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="card p-4">
+              <div className="h-8 w-16 bg-gray-200 rounded animate-pulse mb-2" />
+              <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="card p-4 h-80"><div className="h-full w-full bg-gray-200 rounded animate-pulse" /></div>
+          <div className="card p-4 h-80"><div className="h-full w-full bg-gray-200 rounded animate-pulse" /></div>
+        </div>
       </div>
     )
   }
@@ -112,6 +148,18 @@ export default function AnalyticsPage() {
           <option value="30d">Last 30 Days</option>
         </select>
       </div>
+
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+          <span className="text-sm text-red-700">Some analytics data failed to load</span>
+          <button
+            onClick={loadAnalytics}
+            className="text-sm text-red-700 font-medium hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -160,47 +208,55 @@ export default function AnalyticsPage() {
         {/* Incident Trends */}
         <div className="card p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Incidents Over Time</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={trends?.incident_trends || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Line
-                type="monotone"
-                dataKey="count"
-                stroke="#3B82F6"
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                name="Incidents"
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          {(trends?.incident_trends || []).length === 0 ? (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No incident trend data for this period</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={trends?.incident_trends || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: chartAxis }} />
+                <YAxis tick={{ fontSize: 12, fill: chartAxis }} />
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+                <Line
+                  type="monotone"
+                  dataKey="count"
+                  stroke="#3B82F6"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  name="Incidents"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Category Breakdown */}
         <div className="card p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Category Breakdown</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={categoryData}
-                cx="50%"
-                cy="50%"
-                outerRadius={80}
-                dataKey="value"
-                nameKey="name"
-                label={({ name, percent }) =>
-                  `${name}: ${(percent * 100).toFixed(0)}%`
-                }
-              >
-                {categoryData.map((_, index) => (
-                  <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          {categoryData.length === 0 ? (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No category data for this period</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={categoryData}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  dataKey="value"
+                  nameKey="name"
+                  label={({ name, percent }) =>
+                    `${name}: ${isNaN(percent) ? '0' : (percent * 100).toFixed(0)}%`
+                  }
+                >
+                  {categoryData.map((_, index) => (
+                    <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
@@ -209,33 +265,143 @@ export default function AnalyticsPage() {
         {/* Severity Trends */}
         <div className="card p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Severity Trends</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={trends?.severity_trends || []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="critical" stackId="a" fill={SEVERITY_COLORS.critical} />
-              <Bar dataKey="high" stackId="a" fill={SEVERITY_COLORS.high} />
-              <Bar dataKey="medium" stackId="a" fill={SEVERITY_COLORS.medium} />
-              <Bar dataKey="low" stackId="a" fill={SEVERITY_COLORS.low} />
-            </BarChart>
-          </ResponsiveContainer>
+          {(trends?.severity_trends || []).length === 0 ? (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No severity trend data for this period</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={trends?.severity_trends || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: chartAxis }} />
+                <YAxis tick={{ fontSize: 12, fill: chartAxis }} />
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+                <Legend wrapperStyle={{ color: chartLabel }} />
+                <Bar dataKey="critical" stackId="a" fill={SEVERITY_COLORS.critical} />
+                <Bar dataKey="high" stackId="a" fill={SEVERITY_COLORS.high} />
+                <Bar dataKey="medium" stackId="a" fill={SEVERITY_COLORS.medium} />
+                <Bar dataKey="low" stackId="a" fill={SEVERITY_COLORS.low} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Agent Health Distribution */}
         <div className="card p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Agent Health Distribution</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={healthData} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" tick={{ fontSize: 12 }} />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 12 }} width={80} />
-              <Tooltip />
-              <Bar dataKey="value" fill="#3B82F6" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {healthData.length === 0 ? (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No agent health data for this period</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={healthData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis type="number" tick={{ fontSize: 12, fill: chartAxis }} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 12, fill: chartAxis }} width={80} />
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+                <Bar dataKey="value" fill="#3B82F6" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Charts Row 3 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Decision Trends */}
+        <div className="card p-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Judge Decisions Over Time</h3>
+          {(trends?.decision_trends || []).length === 0 ? (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No decision trend data for this period</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={trends?.decision_trends || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: chartAxis }} />
+                <YAxis tick={{ fontSize: 12, fill: chartAxis }} />
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+                <Line
+                  type="monotone"
+                  dataKey="count"
+                  stroke="#8B5CF6"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  name="Decisions"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Type Breakdown */}
+        <div className="card p-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Incident Type Breakdown</h3>
+          {(summary?.type_breakdown && Object.keys(summary.type_breakdown).length > 0) ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart
+                data={Object.entries(summary.type_breakdown).map(([name, value]) => ({ name, value }))}
+                layout="vertical"
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis type="number" tick={{ fontSize: 12, fill: chartAxis }} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 12, fill: chartAxis }} width={120} />
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+                <Bar dataKey="value" fill="#10B981" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No type data for this period</div>
+          )}
+        </div>
+      </div>
+
+      {/* Charts Row 4 — Agent / Swarm Breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Incidents by Agent */}
+        <div className="card p-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Incidents by Agent</h3>
+          {(summary?.agent_breakdown && Object.keys(summary.agent_breakdown).length > 0) ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart
+                data={Object.entries(summary.agent_breakdown).map(([name, value]) => ({ name, value }))}
+                layout="vertical"
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+                <XAxis type="number" tick={{ fontSize: 12, fill: chartAxis }} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 12, fill: chartAxis }} width={120} />
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+                <Bar dataKey="value" fill="#3B82F6" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No agent data for this period</div>
+          )}
+        </div>
+
+        {/* Incidents by Swarm */}
+        <div className="card p-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Incidents by Swarm</h3>
+          {(summary?.swarm_breakdown && Object.keys(summary.swarm_breakdown).length > 0) ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={Object.entries(summary.swarm_breakdown).map(([name, value]) => ({ name, value }))}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  dataKey="value"
+                  nameKey="name"
+                  label={({ name, percent }) =>
+                    `${name}: ${isNaN(percent) ? '0' : (percent * 100).toFixed(0)}%`
+                  }
+                >
+                  {Object.entries(summary.swarm_breakdown).map((_, index) => (
+                    <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={{ backgroundColor: chartTooltipBg, borderColor: chartTooltipBorder }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[250px] text-gray-400 text-sm">No swarm data for this period</div>
+          )}
         </div>
       </div>
     </div>

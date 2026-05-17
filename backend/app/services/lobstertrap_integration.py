@@ -250,10 +250,7 @@ async def read_lobstertrap_logs(
 
     file_pos = path.stat().st_size
 
-    while (
-        _lobstertrap_process is not None
-        and _lobstertrap_process.returncode is None
-    ):
+    while True:
         try:
             current_size = path.stat().st_size
             if current_size > file_pos:
@@ -270,7 +267,7 @@ async def read_lobstertrap_logs(
                         event = _transform_entry(raw)
                         if event is not None:
                             try:
-                                on_event(event)
+                                await on_event(event)
                             except Exception as exc:
                                 print(f"[lobstertrap] Event handler error: {exc}")
                     file_pos = f.tell()
@@ -295,7 +292,7 @@ def _transform_entry(raw: dict) -> Optional[PB_CES_Event]:
         "action": raw.get("direction", "ingress"),
         "agent_id": "lobstertrap-proxy",
         "session_id": request_id,
-        "tool": raw.get("matched_rule", ""),
+        "tool": raw.get("matched_rule", "") or raw.get("rule_name", ""),
         "input": json.dumps(metadata) if isinstance(metadata, dict) else str(metadata),
         "output": action,
         "decision": action,

@@ -20,6 +20,8 @@ import {
   Check,
   Terminal,
   Lock,
+  Info,
+  HelpCircle,
 } from 'lucide-react'
 
 interface Provider {
@@ -86,6 +88,7 @@ export default function PlaygroundPage() {
   const [showBuilder, setShowBuilder] = useState(false)
   const [sessionName, setSessionName] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [misbehaviorMode, setMisbehaviorMode] = useState(false)
 
   // Human-in-the-loop approval
   const [awaitingApproval, setAwaitingApproval] = useState<null | {
@@ -146,7 +149,7 @@ export default function PlaygroundPage() {
             agent_id: data.agent_id,
             agent_name: data.agent_name,
             payload: data.payload,
-            timestamp: typeof data.timestamp === 'number' ? data.timestamp : new Date(data.timestamp).getTime() / 1000,
+            timestamp: typeof data.timestamp === 'number' ? data.timestamp : data.timestamp ? new Date(data.timestamp).getTime() / 1000 : Date.now() / 1000,
           }
           setEvents((prev) => [...prev, normalized])
         }
@@ -175,7 +178,7 @@ export default function PlaygroundPage() {
         agent_id: item.agent_id,
         agent_name: item.agent_name,
         payload: item.payload,
-        timestamp: new Date(item.timestamp).getTime() / 1000,
+        timestamp: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now() / 1000,
       })))
     } catch (e: any) {
       console.error('Failed to load session events:', e)
@@ -288,7 +291,10 @@ export default function PlaygroundPage() {
       // Auto-start
       const sessionId = res.data?.session_id
       if (sessionId) {
-        await _api(`/playground/sessions/${sessionId}/start`, { method: 'POST' })
+        await _api(`/playground/sessions/${sessionId}/start`, {
+          method: 'POST',
+          body: JSON.stringify({ misbehavior_mode: misbehaviorMode }),
+        })
         await loadSessions()
         const sessRes = await _api(`/playground/sessions/${sessionId}`)
         setActiveSession(sessRes.data)
@@ -301,10 +307,13 @@ export default function PlaygroundPage() {
     }
   }
 
-  const startSession = async (sessionId: string) => {
+  const startSession = async (sessionId: string, withMisbehavior = false) => {
     setLoading(true)
     try {
-      await _api(`/playground/sessions/${sessionId}/start`, { method: 'POST' })
+      await _api(`/playground/sessions/${sessionId}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ misbehavior_mode: withMisbehavior }),
+      })
       await loadSessions()
       const sessRes = await _api(`/playground/sessions/${sessionId}`)
       setActiveSession(sessRes.data)
@@ -401,19 +410,19 @@ export default function PlaygroundPage() {
   const getEventColor = (type: string) => {
     switch (type) {
       case 'agent_thought':
-        return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200'
+        return 'bg-blue-50 border-blue-200 text-blue-800'
       case 'llm_response':
-        return 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 text-purple-800 dark:text-purple-200'
+        return 'bg-purple-50 border-purple-200 text-purple-800'
       case 'action_requested':
-        return 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+        return 'bg-amber-50 border-amber-200 text-amber-800'
       case 'judge_verdict':
-        return 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+        return 'bg-rose-50 border-rose-200 text-rose-800'
       case 'system':
-        return 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+        return 'bg-gray-50 border-gray-200 text-gray-700'
       case 'error':
-        return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+        return 'bg-red-50 border-red-200 text-red-800'
       default:
-        return 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+        return 'bg-gray-50 border-gray-200'
     }
   }
 
@@ -466,8 +475,8 @@ def process_refund(order_id: str):
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Agent Simulator Playground</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900">Agent Simulator Playground</h1>
+          <p className="text-sm text-gray-500 mt-1">
             Configure LLM providers, deploy agent swarms, and watch the Judge Layer intercept actions in real time.
           </p>
         </div>
@@ -475,8 +484,8 @@ def process_refund(order_id: str):
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
               wsConnected
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-red-100 text-red-700'
             }`}
           >
             {wsConnected ? (
@@ -493,14 +502,51 @@ def process_refund(order_id: str):
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
+      {/* How to Use / Instructions */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <HelpCircle className="w-4 h-4 text-blue-500" />
+          <h2 className="text-sm font-semibold text-gray-900">How to Use the Agent Simulator</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          <div className="space-y-2">
+            <p className="font-medium text-gray-800 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">1</span>
+              Configure Provider
+            </p>
+            <p className="text-gray-500 text-xs">
+              Select an LLM provider (OpenAI, Gemini, Claude, Azure, Ollama) and test the connection. Each provider sends real prompts through the Lobster Trap DPI proxy.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="font-medium text-gray-800 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">2</span>
+              Choose a Template
+            </p>
+            <p className="text-gray-500 text-xs">
+              Pick an industry template (Healthcare, Finance, etc.) to simulate realistic agent behavior. Each template defines agent roles, actions, and expected risk patterns.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="font-medium text-gray-800 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">3</span>
+              Watch & Intervene
+            </p>
+            <p className="text-gray-500 text-xs">
+              Start the session and watch events stream in real time. When the Judge Layer blocks an action, you can Approve, Deny, or Escalate it directly from this page.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Provider Config */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-4 flex items-center gap-2">
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
           <BrainCircuit className="w-4 h-4 text-blue-500" />
           LLM Provider Configuration
           {providerValidated && (
@@ -509,7 +555,7 @@ def process_refund(order_id: str):
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Provider</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Provider</label>
             <select
               value={selectedProvider}
               onChange={(e) => {
@@ -527,7 +573,7 @@ def process_refund(order_id: str):
                 setAvailableModels([])
                 setIsCustomModel(false)
               }}
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
             >
               {providers.map((p) => (
                 <option key={p.name} value={p.name}>
@@ -539,39 +585,39 @@ def process_refund(order_id: str):
           {selectedProvider === 'gemini_adc' && (
             <>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">GCP Project ID</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">GCP Project ID</label>
                 <input
                   type="text"
                   value={providerConfig.project_id}
                   onChange={(e) => setProviderConfig((prev) => ({ ...prev, project_id: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                   placeholder="my-gcp-project"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Location</label>
                 <input
                   type="text"
                   value={providerConfig.location}
                   onChange={(e) => setProviderConfig((prev) => ({ ...prev, location: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                   placeholder="us-central1"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Base URL</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Base URL</label>
                 <input
                   type="text"
                   value={providerConfig.base_url}
                   onChange={(e) => setProviderConfig((prev) => ({ ...prev, base_url: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                   placeholder="https://..."
                 />
               </div>
             </>
           )}
           <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Model</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Model</label>
             {availableModels.length > 0 && !isCustomModel ? (
               <select
                 value={providerConfig.model}
@@ -583,7 +629,7 @@ def process_refund(order_id: str):
                     setProviderConfig((prev) => ({ ...prev, model: value }))
                   }
                 }}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
               >
                 {availableModels.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -597,21 +643,21 @@ def process_refund(order_id: str):
                 type="text"
                 value={providerConfig.model}
                 onChange={(e) => setProviderConfig((prev) => ({ ...prev, model: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                 placeholder={providers.find((p) => p.name === selectedProvider)?.default_model || 'model-name'}
               />
             )}
           </div>
           {providers.find((p) => p.name === selectedProvider)?.requires_api_key && (
             <div>
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-xs font-medium text-gray-700 mb-1">
                 API Key
               </label>
               <input
                 type="password"
                 value={providerConfig.api_key}
                 onChange={(e) => setProviderConfig((prev) => ({ ...prev, api_key: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                 placeholder="sk-..."
               />
             </div>
@@ -628,31 +674,31 @@ def process_refund(order_id: str):
           </div>
         </div>
         {providerValid === true && (
-          <p className="mt-2 text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+          <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5" /> Provider configuration is valid
           </p>
         )}
         {providerValid === false && (
-          <p className="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+          <p className="mt-2 text-xs text-red-600 flex items-center gap-1">
             <AlertTriangle className="w-3.5 h-3.5" /> Provider validation failed
           </p>
         )}
       </div>
 
       {/* Session Builder */}
-      <div className={`bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 ${!providerValidated ? 'opacity-60 pointer-events-none relative' : ''}`}>
+      <div className={`bg-white rounded-xl border border-gray-200 p-5 ${!providerValidated ? 'opacity-60 pointer-events-none relative' : ''}`}>
         {!providerValidated && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-            <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-lg shadow-sm">
-              <Lock className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-              <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Please validate a provider first</span>
+            <div className="flex items-center gap-2 bg-gray-100 px-4 py-2 rounded-lg shadow-sm">
+              <Lock className="w-4 h-4 text-gray-500" />
+              <span className="text-sm font-medium text-gray-600">Please validate a provider first</span>
             </div>
           </div>
         )}
         <button
           onClick={() => setShowBuilder((s) => !s)}
           disabled={!providerValidated}
-          className="w-full flex items-center justify-between text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider disabled:opacity-50"
+          className="w-full flex items-center justify-between text-sm font-semibold text-gray-900 uppercase tracking-wider disabled:opacity-50"
         >
           <span className="flex items-center gap-2">
             <Plus className="w-4 h-4 text-blue-500" />
@@ -665,21 +711,21 @@ def process_refund(order_id: str):
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Session Name</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Session Name</label>
                 <input
                   type="text"
                   value={sessionName}
                   onChange={(e) => setSessionName(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                   placeholder="Healthcare Swarm Test"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Industry Template</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Industry Template</label>
                 <select
                   value={selectedTemplate}
                   onChange={(e) => setSelectedTemplate(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- Custom --</option>
                   {templates.map((t) => (
@@ -692,13 +738,39 @@ def process_refund(order_id: str):
             </div>
 
             {selectedTemplate && (
-              <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 text-sm text-blue-800 dark:text-blue-200">
-                <strong>Template:</strong> {templates.find((t) => t.id === selectedTemplate)?.name}
-                <br />
-                {templates.find((t) => t.id === selectedTemplate)?.description}
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <strong>{templates.find((t) => t.id === selectedTemplate)?.name}</strong> —{' '}
+                    {templates.find((t) => t.id === selectedTemplate)?.description}
+                    <div className="mt-2 flex items-center gap-2 text-xs text-blue-700">
+                      <span className="px-2 py-0.5 rounded bg-blue-100">
+                        {templates.find((t) => t.id === selectedTemplate)?.agent_count || 0} agents
+                      </span>
+                      <span className="text-blue-600">
+                        Simulates real-world scenarios for testing detection rules.
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={misbehaviorMode}
+                  onChange={(e) => setMisbehaviorMode(e.target.checked)}
+                  className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                />
+                <span className="flex items-center gap-1">
+                  <ShieldAlert className="w-4 h-4 text-red-500" />
+                  Misbehavior Mode (forces malicious actions ~70%)
+                </span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={createFromTemplate}
@@ -713,7 +785,7 @@ def process_refund(order_id: str):
                   setShowBuilder(false)
                   setSelectedTemplate('')
                 }}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
@@ -724,34 +796,58 @@ def process_refund(order_id: str):
 
       {/* Active Sessions */}
       {sessions.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-4">
-            Sessions
-          </h2>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+              Sessions
+            </h2>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={misbehaviorMode}
+                onChange={(e) => setMisbehaviorMode(e.target.checked)}
+                className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+              />
+              <span className="flex items-center gap-1">
+                <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
+                Misbehavior Mode
+              </span>
+            </label>
+          </div>
           <div className="space-y-2">
             {sessions.map((sess) => (
               <div
                 key={sess.id}
                 className={`flex items-center justify-between rounded-lg border px-4 py-3 transition-colors ${
                   activeSession?.id === sess.id
-                    ? 'border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-900/10'
-                    : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    ? 'border-blue-300 bg-blue-50/50'
+                    : 'border-gray-200 hover:bg-gray-50'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <Bot className="w-5 h-5 text-gray-400 dark:text-gray-500" />
+                  <Bot className="w-5 h-5 text-gray-400" />
                   <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{sess.name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <p className="text-sm font-medium text-gray-900">{sess.name}</p>
+                    <p className="text-xs text-gray-500">
                       {sess.provider_name} · {sess.industry_template || 'custom'} ·{' '}
                       <span
                         className={`font-medium ${
                           sess.status === 'running'
-                            ? 'text-green-600 dark:text-green-400'
-                            : 'text-gray-500 dark:text-gray-400'
+                            ? 'text-green-600'
+                            : 'text-gray-500'
                         }`}
                       >
-                        {sess.status}
+                        {sess.status === 'running' ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                            LIVE
+                          </span>
+                        ) : (
+                          sess.status
+                        )}
                       </span>
                     </p>
                   </div>
@@ -761,15 +857,15 @@ def process_refund(order_id: str):
                     <button
                       onClick={() => stopSession(sess.id)}
                       disabled={loading}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 px-3 py-1.5 text-xs font-medium transition-colors"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 px-3 py-1.5 text-xs font-medium transition-colors"
                     >
                       <Square className="w-3.5 h-3.5" /> Stop
                     </button>
                   ) : (
                     <button
-                      onClick={() => startSession(sess.id)}
+                      onClick={() => startSession(sess.id, misbehaviorMode)}
                       disabled={loading}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-green-100 hover:bg-green-200 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-700 dark:text-green-300 px-3 py-1.5 text-xs font-medium transition-colors"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 text-xs font-medium transition-colors"
                     >
                       <Play className="w-3.5 h-3.5" /> Start
                     </button>
@@ -779,7 +875,7 @@ def process_refund(order_id: str):
                       setActiveSession(sess)
                       setActiveSessionId(sess.id)
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     View
                   </button>
@@ -789,7 +885,7 @@ def process_refund(order_id: str):
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                       deletingId === sess.id
                         ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400'
+                        : 'bg-red-50 hover:bg-red-100 text-red-600'
                     }`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -805,25 +901,33 @@ def process_refund(order_id: str):
       {/* Live Event Feed + SDK Snippet */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Events */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex flex-col h-[600px]">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-blue-500" />
-            Live Event Feed
-            {activeSession && (
-              <span className="text-xs font-normal text-gray-500 dark:text-gray-400 ml-2">
-                — {activeSession.name}
-              </span>
-            )}
-          </h2>
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5 flex flex-col h-[600px]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-blue-500" />
+              Live Event Feed
+              {activeSession && (
+                <span className="text-xs font-normal text-gray-500 ml-2">
+                  — {activeSession.name}
+                </span>
+              )}
+            </h2>
+            <div className="hidden md:flex items-center gap-3 text-[10px] text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" /> Thought</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-400" /> LLM</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Action</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400" /> Verdict</span>
+            </div>
+          </div>
 
           {/* Human-in-the-loop approval banner */}
           {awaitingApproval && (
-            <div className="mb-4 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4">
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
               <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-                <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">Human Approval Required</h3>
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                <h3 className="text-sm font-bold text-amber-800">Human Approval Required</h3>
               </div>
-              <div className="text-sm text-amber-800 dark:text-amber-200 space-y-1 mb-3">
+              <div className="text-sm text-amber-800 space-y-1 mb-3">
                 <p>
                   <span className="font-medium">Agent:</span>{' '}
                   {awaitingApproval.agent_name} wants to execute:{" "}
@@ -862,7 +966,7 @@ def process_refund(order_id: str):
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {events.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
+              <div className="flex flex-col items-center justify-center h-full text-gray-400">
                 <Bot className="w-10 h-10 mb-2 opacity-50" />
                 <p className="text-sm">Start a session to see live events</p>
               </div>
@@ -878,7 +982,7 @@ def process_refund(order_id: str):
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-semibold capitalize">{ev.event_type.replace(/_/g, ' ')}</span>
                       {ev.agent_name && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-white/60 dark:bg-black/20 font-medium">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-white/60 font-medium">
                           {ev.agent_name}
                         </span>
                       )}
@@ -890,7 +994,7 @@ def process_refund(order_id: str):
                         <p>
                           Action: <span className="font-mono font-medium">{ev.payload.action}</span>
                           {ev.payload.is_malicious && (
-                            <span className="ml-2 text-red-600 dark:text-red-400 font-bold">[MALICIOUS]</span>
+                            <span className="ml-2 text-red-600 font-bold">[MALICIOUS]</span>
                           )}
                         </p>
                       )}
@@ -900,26 +1004,26 @@ def process_refund(order_id: str):
                           <span
                             className={`font-bold ${
                               ev.payload.verdict === 'ALLOW'
-                                ? 'text-green-700 dark:text-green-400'
+                                ? 'text-green-700'
                                 : ev.payload.verdict === 'QUARANTINE'
-                                ? 'text-amber-700 dark:text-amber-400'
-                                : 'text-red-700 dark:text-red-400'
+                                ? 'text-amber-700'
+                                : 'text-red-700'
                             }`}
                           >
                             {ev.payload.verdict}
                           </span>
                           {ev.payload.latency_ms !== undefined && (
-                            <span className="ml-2 text-gray-500 dark:text-gray-400">
+                            <span className="ml-2 text-gray-500">
                               ({ev.payload.latency_ms}ms)
                             </span>
                           )}
                         </p>
                       )}
-                      {ev.payload?.rationale && <p className="text-gray-500 dark:text-gray-400">{ev.payload.rationale}</p>}
+                      {ev.payload?.rationale && <p className="text-gray-500">{ev.payload.rationale}</p>}
                       {ev.payload?.message && <p>{ev.payload.message}</p>}
-                      {ev.payload?.error && <p className="text-red-600 dark:text-red-400">{ev.payload.error}</p>}
+                      {ev.payload?.error && <p className="text-red-600">{ev.payload.error}</p>}
                       {ev.payload?.mismatch && (
-                        <p className="text-red-600 dark:text-red-400 font-bold">
+                        <p className="text-red-600 font-bold">
                           ⚠ MISMATCH — Judge overrode LLM!
                         </p>
                       )}
@@ -933,13 +1037,13 @@ def process_refund(order_id: str):
         </div>
 
         {/* SDK Integration */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider mb-4 flex items-center gap-2">
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Code className="w-4 h-4 text-blue-500" />
             SDK Integration
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Wrap any agent action with the <code className="font-mono text-blue-600 dark:text-blue-400">@guard</code>{" "}
+          <p className="text-xs text-gray-500 mb-3">
+            Wrap any agent action with the <code className="font-mono text-blue-600">@guard</code>{" "}
             decorator. The Judge Layer intercepts every call before execution.
           </p>
           <div className="relative">
@@ -955,12 +1059,12 @@ def process_refund(order_id: str):
             </button>
           </div>
           <div className="mt-4 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-300">Supported Providers</h3>
+            <h3 className="text-xs font-semibold text-gray-700">Supported Providers</h3>
             <div className="flex flex-wrap gap-2">
               {['OpenAI', 'Gemini', 'Ollama', 'Azure', 'Claude'].map((name) => (
                 <span
                   key={name}
-                  className="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-xs text-gray-600 dark:text-gray-400 font-medium"
+                  className="px-2 py-1 rounded-full bg-gray-100 text-xs text-gray-600 font-medium"
                 >
                   {name}
                 </span>
@@ -968,12 +1072,12 @@ def process_refund(order_id: str):
             </div>
           </div>
           <div className="mt-4 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-300">Framework Middleware</h3>
+            <h3 className="text-xs font-semibold text-gray-700">Framework Middleware</h3>
             <div className="flex flex-wrap gap-2">
               {['LangChain', 'CrewAI', 'LlamaIndex', 'AutoGen'].map((name) => (
                 <span
                   key={name}
-                  className="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-xs text-gray-600 dark:text-gray-400 font-medium"
+                  className="px-2 py-1 rounded-full bg-gray-100 text-xs text-gray-600 font-medium"
                 >
                   {name}
                 </span>

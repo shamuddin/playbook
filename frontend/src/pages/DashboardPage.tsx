@@ -14,6 +14,7 @@ import {
   Clock,
   FileText,
   Eye,
+  Swords,
 } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { getApiBase, getRefreshInterval } from '../utils/config'
@@ -79,6 +80,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [ltRunning, setLtRunning] = useState(false)
   const [ltEvents, setLtEvents] = useState(0)
+  const [attacking, setAttacking] = useState(false)
+  const [swarmRunning, setSwarmRunning] = useState(false)
   const { connected, messages } = useWebSocket()
 
   const fetchDashboard = useCallback(() => {
@@ -89,6 +92,19 @@ export default function DashboardPage() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
+  }, [])
+
+  const launchAttack = useCallback(async () => {
+    setAttacking(true)
+    try {
+      const res = await apiFetch(`${API_BASE}/demo/attack`, { method: 'POST' })
+      if (!res.ok) throw new Error('Attack request failed')
+      // Dashboard will auto-update via WebSocket incident_detected events
+    } catch {
+      alert('Failed to launch attack. Is the backend running?')
+    } finally {
+      setAttacking(false)
+    }
   }, [])
 
   const fetchLtQuickStatus = useCallback(() => {
@@ -110,18 +126,32 @@ export default function DashboardPage() {
       .catch(() => {})
   }, [])
 
+  const fetchSwarmStatus = useCallback(() => {
+    apiFetch(`${API_BASE}/playground/sessions`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res) => {
+        if (res?.data?.items) {
+          const running = res.data.items.some((s: any) => s.status === 'running')
+          setSwarmRunning(running)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     fetchDashboard()
     fetchLtQuickStatus()
+    fetchSwarmStatus()
     const intervalSeconds = getRefreshInterval()
     if (intervalSeconds > 0) {
       const id = setInterval(() => {
         fetchDashboard()
         fetchLtQuickStatus()
+        fetchSwarmStatus()
       }, intervalSeconds * 1000)
       return () => clearInterval(id)
     }
-  }, [fetchDashboard, fetchLtQuickStatus])
+  }, [fetchDashboard, fetchLtQuickStatus, fetchSwarmStatus])
 
   useEffect(() => {
     if (messages.length === 0) return
@@ -195,10 +225,38 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <span className="text-sm text-gray-500">
-          {new Date().toLocaleDateString()}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={launchAttack}
+            disabled={attacking}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white text-sm font-semibold rounded-lg shadow transition-colors"
+          >
+            <Swords className="w-4 h-4" />
+            {attacking ? 'Firing...' : 'Launch Attack'}
+          </button>
+          <span className="text-sm text-gray-500">
+            {new Date().toLocaleDateString()}
+          </span>
+        </div>
       </div>
+
+      {swarmRunning && (
+        <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+          </span>
+          <span className="text-sm font-semibold text-red-700">
+            LIVE — Agent Swarm is running. Real-time incidents being captured.
+          </span>
+          <button
+            onClick={() => navigate('/playground')}
+            className="ml-auto text-xs font-medium text-red-700 hover:text-red-800 underline"
+          >
+            View Playground
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -429,7 +487,7 @@ export default function DashboardPage() {
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {messages.slice(0, 20).map((msg, i) => (
               <div
-                key={i}
+                key={`${msg.event_id || msg.incident_id || msg.timestamp || ''}-${i}`}
                 onClick={() => msg.incident_id && navigate(`/incidents/${msg.incident_id}`)}
                 className={`flex items-center gap-3 p-2 rounded-lg text-sm ${
                   msg.incident_id ? 'cursor-pointer hover:bg-gray-50' : ''
@@ -458,6 +516,12 @@ export default function DashboardPage() {
                   <span className="font-medium text-gray-900">{msg.event_type}</span>
                   {msg.incident_id && (
                     <span className="text-xs text-gray-500 ml-2">{msg.incident_id}</span>
+                  )}
+                  {msg.agent_id && (
+                    <span className="text-xs text-gray-500 ml-2">Agent: {msg.agent_id}</span>
+                  )}
+                  {msg.swarm_id && (
+                    <span className="text-xs text-gray-500 ml-2">Swarm: {msg.swarm_id}</span>
                   )}
                   {msg.severity && (
                     <span className={`ml-2 px-1.5 py-0.5 rounded text-xs font-medium ${

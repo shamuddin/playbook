@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { AlertTriangle, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getApiBase, getPageSize } from '../utils/config'
 import { apiFetch } from '../utils/api'
 import { useWebSocket } from '../hooks/useWebSocket'
 
 const API_BASE = getApiBase()
+
+interface AgentOption {
+  system_id: string
+  name: string
+}
 
 interface Incident {
   id: string
@@ -14,6 +19,8 @@ interface Incident {
   severity: string
   status: string
   event_id: string | null
+  agent_id: string | null
+  swarm_id: string | null
   confidence: number
   judge_verdict: string | null
   bypass_detected: boolean
@@ -22,6 +29,7 @@ interface Incident {
 
 export default function IncidentsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -30,16 +38,43 @@ export default function IncidentsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState('')
+  const [agentFilter, setAgentFilter] = useState(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    return urlParams.get('agent_id') || ''
+  })
+  const [swarmFilter, setSwarmFilter] = useState(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    return urlParams.get('swarm_id') || ''
+  })
+  const [agents, setAgents] = useState<AgentOption[]>([])
   const [livePulse, setLivePulse] = useState(false)
   const { messages } = useWebSocket()
 
-  const fetchIncidents = useCallback(async () => {
-    setLoading(true)
+  const fetchAgents = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/agents?page_size=100`)
+      if (res.ok) {
+        const data = await res.json()
+        const items = (data.data?.items || []).map((a: any) => ({
+          system_id: a.system_id,
+          name: a.name,
+        }))
+        setAgents(items)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const fetchIncidents = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     const params = new URLSearchParams()
     params.set('page', String(page))
     params.set('page_size', String(pageSize))
     if (statusFilter) params.set('status', statusFilter)
     if (severityFilter) params.set('severity', severityFilter)
+    if (agentFilter) params.set('agent_id', agentFilter)
+    if (swarmFilter) params.set('swarm_id', swarmFilter)
     if (search) params.set('q', search)
 
     try {
@@ -53,16 +88,30 @@ export default function IncidentsPage() {
       setTotal(0)
     }
     setLoading(false)
-  }, [page, pageSize, statusFilter, severityFilter, search])
+  }, [page, pageSize, statusFilter, severityFilter, agentFilter, swarmFilter, search])
+
+  useEffect(() => {
+    fetchAgents()
+  }, [fetchAgents])
 
   useEffect(() => {
     fetchIncidents()
   }, [fetchIncidents])
 
+  // Sync agentFilter from URL query param (deep-linked from Agent Health)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlAgent = urlParams.get('agent_id')
+    if (urlAgent && urlAgent !== agentFilter) {
+      setAgentFilter(urlAgent)
+      setPage(1)
+    }
+  }, [location.search])
+
   useEffect(() => {
     const latest = messages[0]
     if (latest && latest.event_type === 'incident_detected') {
-      fetchIncidents()
+      fetchIncidents({ silent: true })
       setLivePulse(true)
       const t = setTimeout(() => setLivePulse(false), 3000)
       return () => clearTimeout(t)
@@ -123,7 +172,7 @@ export default function IncidentsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Incident ID, type, agent..."
-                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 bg-white text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -132,7 +181,7 @@ export default function IncidentsPage() {
             <select
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 border border-gray-200 bg-white text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All</option>
               <option value="new">New</option>
@@ -147,7 +196,7 @@ export default function IncidentsPage() {
             <select
               value={severityFilter}
               onChange={(e) => { setSeverityFilter(e.target.value); setPage(1) }}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 border border-gray-200 bg-white text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All</option>
               <option value="critical">Critical</option>
@@ -155,6 +204,29 @@ export default function IncidentsPage() {
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Agent</label>
+            <select
+              value={agentFilter}
+              onChange={(e) => { setAgentFilter(e.target.value); setPage(1) }}
+              className="px-3 py-2 border border-gray-200 bg-white text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Agents</option>
+              {agents.map((a) => (
+                <option key={a.system_id} value={a.system_id}>{a.name || a.system_id}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Swarm</label>
+            <input
+              type="text"
+              value={swarmFilter}
+              onChange={(e) => { setSwarmFilter(e.target.value); setPage(1) }}
+              placeholder="Swarm ID..."
+              className="px-3 py-2 border border-gray-200 bg-white text-gray-900 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
           <button type="submit" className="btn-primary py-2 px-4">
             <Filter className="w-4 h-4" />
@@ -180,6 +252,7 @@ export default function IncidentsPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Severity</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Agent</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Swarm</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Confidence</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Judge</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Created</th>
@@ -204,7 +277,21 @@ export default function IncidentsPage() {
                         {inc.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{inc.event_id || '—'}</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {inc.agent_id ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            navigate(`/agents`)
+                          }}
+                          className="text-blue-600 hover:text-blue-700 hover:underline"
+                          title={inc.agent_id}
+                        >
+                          {agents.find((a) => a.system_id === inc.agent_id)?.name || inc.agent_id}
+                        </button>
+                      ) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{inc.swarm_id || '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{(inc.confidence * 100).toFixed(0)}%</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">

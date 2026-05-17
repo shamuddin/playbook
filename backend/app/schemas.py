@@ -83,6 +83,9 @@ class IncidentResponse(IncidentBase):
     forensics_status: str
     judge_verdict: Optional[str] = None
     bypass_detected: bool = False
+    description: Optional[str] = None
+    agent_id: Optional[str] = None
+    swarm_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

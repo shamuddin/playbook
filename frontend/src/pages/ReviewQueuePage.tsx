@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UserCheck, Clock, AlertTriangle, CheckCircle } from 'lucide-react'
+import { UserCheck, Clock, AlertTriangle, CheckCircle, ThumbsUp, ThumbsDown, ShieldAlert, RotateCcw } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
 import { apiFetch } from '../utils/api'
@@ -25,6 +25,7 @@ export default function ReviewQueuePage() {
   const navigate = useNavigate()
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   useEffect(() => {
     loadQueue()
@@ -42,12 +43,14 @@ export default function ReviewQueuePage() {
       const data = await res.json()
       let items = data.data || []
 
-      // Also fetch all incidents and filter for ESCALATE verdict
+      // Also fetch all incidents and filter for ESCALATE verdict or pending human review
       const allRes = await apiFetch(`${API_BASE}/incidents?page_size=100`)
       if (!allRes.ok) throw new Error('Unauthorized')
       const allData = await allRes.json()
       const escalateItems = (allData.data || []).filter(
-        (i: Incident) => i.judge_verdict === 'ESCALATE' && !items.find((x: Incident) => x.id === i.id)
+        (i: Incident) =>
+          (i.judge_verdict === 'ESCALATE' || i.status === 'detected' || i.status === 'classified') &&
+          !items.find((x: Incident) => x.id === i.id)
       )
       items = [...items, ...escalateItems]
       setIncidents(items)
@@ -55,6 +58,30 @@ export default function ReviewQueuePage() {
       setIncidents([])
     }
     setLoading(false)
+  }
+
+  const handleAction = async (incidentId: string, action: string) => {
+    setActionLoading(`${incidentId}-${action}`)
+    try {
+      let status = incidentId
+      if (action === 'acknowledge') status = 'investigating'
+      else if (action === 'approve') status = 'resolved'
+      else if (action === 'deny') status = 'false_positive'
+      else if (action === 'escalate') status = 'escalated'
+
+      const res = await apiFetch(`${API_BASE}/incidents/${incidentId}/status?status=${status}`, {
+        method: 'PUT',
+      })
+      if (res.ok) {
+        setIncidents((prev) => prev.filter((i) => i.incident_id !== incidentId))
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.detail || `Failed to ${action} incident`)
+      }
+    } catch (err: any) {
+      alert(`Failed to ${action}: ` + (err.message || 'Network error'))
+    }
+    setActionLoading(null)
   }
 
   const severityBadge = (severity: string) => {
@@ -71,9 +98,19 @@ export default function ReviewQueuePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Review Queue</h1>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 text-sm font-medium">
-          <UserCheck className="w-4 h-4" />
-          {incidents.length} pending
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadQueue}
+            disabled={loading}
+            className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+            title="Refresh queue"
+          >
+            <RotateCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 text-sm font-medium">
+            <UserCheck className="w-4 h-4" />
+            {incidents.length} pending
+          </div>
         </div>
       </div>
 
@@ -119,10 +156,56 @@ export default function ReviewQueuePage() {
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col items-end gap-2">
                   <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
                     {inc.judge_verdict || 'ESCALATED'}
                   </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleAction(inc.incident_id, 'acknowledge')
+                      }}
+                      disabled={!!actionLoading}
+                      title="Acknowledge — start investigation"
+                      className="p-1.5 rounded hover:bg-blue-100 text-blue-600 disabled:opacity-50"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleAction(inc.incident_id, 'approve')
+                      }}
+                      disabled={!!actionLoading}
+                      title="Approve — mark as resolved"
+                      className="p-1.5 rounded hover:bg-green-100 text-green-600 disabled:opacity-50"
+                    >
+                      <ThumbsUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleAction(inc.incident_id, 'deny')
+                      }}
+                      disabled={!!actionLoading}
+                      title="Deny — mark as false positive"
+                      className="p-1.5 rounded hover:bg-red-100 text-red-600 disabled:opacity-50"
+                    >
+                      <ThumbsDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleAction(inc.incident_id, 'escalate')
+                      }}
+                      disabled={!!actionLoading}
+                      title="Escalate — send to senior analyst"
+                      className="p-1.5 rounded hover:bg-orange-100 text-orange-600 disabled:opacity-50"
+                    >
+                      <ShieldAlert className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
