@@ -46,7 +46,7 @@ def _build_baselines() -> list[dict]:
             "severity": severity,
             "severity_threshold": severity,
             "auto_contain_enabled": auto_contain_map.get(severity, False),
-            "escalation_contacts": ["security@example.com"],
+            "escalation_contacts": ["shamuddin1011@gmail.com"],
             "response_time_sla_seconds": 1800 if severity == IncidentSeverity.CRITICAL else 3600,
             "forensic_level": "deep" if severity == IncidentSeverity.CRITICAL else "standard",
             "notify_targets": ["#security-alerts", "#incident-response"],

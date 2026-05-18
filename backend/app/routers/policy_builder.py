@@ -4,6 +4,7 @@ Endpoints for managing NIST baselines, ODPs, industry templates,
 policy versions, and conflict detection.
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,30 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/policy-builder", tags=["policy-builder"])
+
+
+import re as _re
+
+_EMAIL_RE = _re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _validate_odp_emails(odps: dict[str, str]) -> None:
+    """Validate email addresses in escalation_contacts ODP."""
+    contacts_raw = odps.get("escalation_contacts")
+    if not contacts_raw:
+        return
+    try:
+        contacts = json.loads(contacts_raw)
+    except Exception:
+        return
+    if not isinstance(contacts, list):
+        return
+    invalid = [c for c in contacts if isinstance(c, str) and not _EMAIL_RE.match(c)]
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid escalation email(s): {', '.join(invalid)}",
+        )
 
 
 # ============================================================================
@@ -301,6 +326,7 @@ async def bulk_update_odps(
     total_conflicts = 0
 
     for incident_type, odps in updates.items():
+        _validate_odp_emails(odps)
         baseline_result = await db.execute(
             select(NistBaseline).where(NistBaseline.incident_type == incident_type)
         )
@@ -371,6 +397,8 @@ async def update_odp(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Baseline for {incident_type} not found",
         )
+
+    _validate_odp_emails(request.odps)
 
     applied = 0
     for key, value in request.odps.items():
@@ -694,6 +722,55 @@ async def list_templates(
         )
         for t in templates
     ]
+
+
+@router.post("/templates", response_model=StandardResponse)
+async def create_template(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Create a custom industry template from current ODP overrides."""
+    template_id = body.get("template_id")
+    name = body.get("name")
+    description = body.get("description", "")
+    odp_set = body.get("odp_set", {})
+
+    if not template_id or not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="template_id and name are required",
+        )
+
+    # Check for duplicate template_id
+    existing = await db.execute(
+        select(IndustryTemplate).where(IndustryTemplate.template_id == template_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Template {template_id} already exists",
+        )
+
+    template = IndustryTemplate(
+        template_id=template_id,
+        name=name,
+        description=description,
+        odp_set=odp_set,
+        is_active=True,
+    )
+    db.add(template)
+    await db.commit()
+
+    return StandardResponse(
+        data={
+            "id": template.id,
+            "template_id": template.template_id,
+            "name": template.name,
+            "description": template.description,
+            "odp_set": template.odp_set,
+        },
+        message=f"Custom template '{name}' created successfully",
+    )
 
 
 @router.post("/templates/{template_id}/apply")

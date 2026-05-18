@@ -10,6 +10,7 @@ import logging
 import asyncio
 from dataclasses import dataclass
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from enum import Enum
 from typing import Any, Optional
 
@@ -166,9 +167,17 @@ class NotificationService:
             )
 
         subject = message.get("title", "PLAYBOOK Alert")
-        body = message.get("body", "")
+        body_text = message.get("body", "")
+        body_html = message.get("html_body", "")
 
-        mime = MIMEText(body, "plain", "utf-8")
+        # Build multipart message (HTML + plain text fallback)
+        if body_html:
+            mime = MIMEMultipart("alternative")
+            mime.attach(MIMEText(body_text, "plain", "utf-8"))
+            mime.attach(MIMEText(body_html, "html", "utf-8"))
+        else:
+            mime = MIMEText(body_text, "plain", "utf-8")
+
         mime["Subject"] = subject
         mime["From"] = from_addr
         mime["To"] = ", ".join(to_addrs) if isinstance(to_addrs, list) else to_addrs

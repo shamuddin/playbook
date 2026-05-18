@@ -184,6 +184,22 @@ export default function DashboardPage() {
         next.judge_layer = { ...next.judge_layer, total_decisions: next.judge_layer.total_decisions + 1 }
       }
 
+      // Swarm judge verdict — also counts as a judge decision
+      if (msg.event_type === 'swarm_judge_verdict') {
+        next.judge_layer = { ...next.judge_layer, total_decisions: next.judge_layer.total_decisions + 1 }
+      }
+
+      // Swarm incident created
+      if (msg.event_type === 'swarm_incident_created') {
+        next.overview = { ...next.overview, total_incidents: next.overview.total_incidents + 1 }
+        if (msg.severity === 'critical') {
+          next.overview = { ...next.overview, critical_alerts: next.overview.critical_alerts + 1 }
+        }
+        next.incidents = { ...next.incidents, by_severity: { ...next.incidents.by_severity } }
+        const sev = msg.severity || 'unknown'
+        next.incidents.by_severity[sev] = (next.incidents.by_severity[sev] || 0) + 1
+      }
+
       // Playground incident created
       if (msg.type === 'playground_event' && msg.event_type === 'incident_created') {
         next.overview = { ...next.overview, total_incidents: next.overview.total_incidents + 1 }

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PLAYBOOK — AI Agent Security Platform</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0a0e1a;
+      color: #fff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .slide {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 60px 80px;
+      position: relative;
+    }
+    .slide::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(ellipse at 30% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 60%),
+                  radial-gradient(ellipse at 70% 80%, rgba(239, 68, 68, 0.06) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .content { position: relative; z-index: 1; max-width: 1200px; width: 100%; }
+
+    /* SLIDE 1: HOOK */
+    .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 40px; }
+    .logo-icon {
+      width: 64px; height: 64px;
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; font-weight: 800;
+      box-shadow: 0 0 40px rgba(59, 130, 246, 0.3);
+    }
+    .logo-text { font-size: 42px; font-weight: 800; letter-spacing: -1px; }
+    .tagline { font-size: 22px; color: #94a3b8; font-weight: 400; margin-bottom: 60px; }
+
+    .problem-box {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 16px;
+      padding: 32px 40px;
+      margin-bottom: 32px;
+    }
+    .problem-box h2 {
+      color: #ef4444;
+      font-size: 18px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 16px;
+    }
+    .problem-box p {
+      font-size: 20px;
+      line-height: 1.7;
+      color: #e2e8f0;
+    }
+    .problem-box .highlight {
+      color: #f87171;
+      font-weight: 600;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-top: 40px;
+    }
+    .stat-card {
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+    .stat-card .number {
+      font-size: 36px;
+      font-weight: 800;
+      color: #3b82f6;
+      margin-bottom: 8px;
+    }
+    .stat-card .number.red { color: #ef4444; }
+    .stat-card .number.amber { color: #f59e0b; }
+    .stat-card .number.emerald { color: #10b981; }
+    .stat-card .label {
+      font-size: 13px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* SLIDE 2: COMPETITORS */
+    .competitor-section h2 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+    .competitor-section h2 span { color: #3b82f6; }
+
+    .comp-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 40px;
+    }
+    .comp-table th {
+      text-align: left;
+      padding: 16px 20px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    }
+    .comp-table td {
+      padding: 20px;
+      font-size: 15px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+      vertical-align: top;
+    }
+    .comp-table .comp-name {
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .comp-table .comp-tag {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .comp-table .x { color: #ef4444; font-weight: 700; }
+    .comp-table .check { color: #10b981; font-weight: 700; }
+    .comp-table .playbook-row td {
+      background: rgba(59, 130, 246, 0.08);
+      border-left: 3px solid #3b82f6;
+    }
+    .comp-table .playbook-row .comp-name { color: #60a5fa; }
+
+    .differentiator {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.05));
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 16px;
+      padding: 32px 40px;
+    }
+    .differentiator h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #60a5fa;
+    }
+    .differentiator p {
+      font-size: 18px;
+      line-height: 1.7;
+      color: #cbd5e1;
+    }
+    .differentiator strong {
+      color: #fff;
+    }
+
+    /* SLIDE 3: DEMO START */
+    .demo-start {
+      text-align: center;
+    }
+    .demo-start h2 {
+      font-size: 40px;
+      font-weight: 800;
+      margin-bottom: 20px;
+    }
+    .demo-start h2 span {
+      background: linear-gradient(135deg, #3b82f6, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .demo-start p {
+      font-size: 20px;
+      color: #94a3b8;
+      margin-bottom: 40px;
+    }
+    .demo-btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      color: #fff;
+      padding: 18px 48px;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 0 40px rgba(59, 130, 246, 0.3);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.3); }
+      50% { box-shadow: 0 0 60px rgba(59, 130, 246, 0.5); }
+    }
+
+    /* Scroll indicator */
+    .scroll-hint {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #64748b;
+      font-size: 13px;
+      animation: bounce 2s infinite;
+    }
+    @keyframes bounce {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(-8px); }
+    }
+
+    /* Navigation dots */
+    .dots {
+      position: fixed;
+      right: 30px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 100;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(148, 163, 184, 0.3);
+      transition: all 0.3s;
+    }
+    .dot.active {
+      background: #3b82f6;
+      box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- SLIDE 1: THE PROBLEM -->
+  <section class="slide" id="problem">
+    <div class="content">
+      <div class="logo">
+        <div class="logo-icon">P</div>
+        <div class="logo-text">PLAYBOOK</div>
+      </div>
+      <div class="tagline">AI Agent Security Platform</div>
+
+      <div class="problem-box">
+        <h2>🚨 The Problem</h2>
+        <p>
+          Enterprises deployed <span class="highlight">thousands of autonomous AI agents</span> in 2025.
+          Each agent has access to databases, APIs, and sensitive data.
+          <br><br>
+          But <span class="highlight">nobody built the security layer to watch them</span>.
+          When an agent goes rogue — exfiltrating customer data, injecting malicious prompts,
+          or escalating privileges — you find out <span class="highlight">after the damage is done</span>.
+        </p>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="number red">$4.5M</div>
+          <div class="label">Avg. Data Breach Cost</div>
+        </div>
+        <div class="stat-card">
+          <div class="number amber">73%</div>
+          <div class="label">Orgs Lack Agent Security</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">287</div>
+          <div class="label">Days to Identify</div>
+        </div>
+        <div class="stat-card">
+          <div class="number emerald">&lt;1%</div>
+          <div class="label">Have Real-Time Defense</div>
+        </div>
+      </div>
+    </div>
+    <div class="scroll-hint">▼ Competitors</div>
+  </section>
+
+  <!-- SLIDE 2: COMPETITORS -->
+  <section class="slide" id="competitors">
+    <div class="content competitor-section">
+      <h2>Why Existing Solutions <span>Fall Short</span></h2>
+
+      <table class="comp-table">
+        <thead>
+          <tr>
+            <th>Solution</th>
+            <th>What They Do</th>
+            <th>Runtime Enforcement</th>
+            <th>Forensics</th>
+            <th>Deterministic Judge</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="comp-name">SupraWall</div>
+              <div class="comp-tag">Apache 2.0 Guardrail</div>
+            </td>
+            <td>Single request allow/deny<br><span style="color:#64748b">~1.2ms latency</span></td>
+            <td class="check">✓</td>
+            <td class="x">✗</td>
+            <td class="x">✗</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="comp-name">Swimlane Turbine</div>
+              <div class="comp-tag">General SOC</div>
+            </td>
+            <td>Generic security orchestration<br><span style="color:#64748b">Not AI-native</span></td>
+            <td class="check">✓</td>
+            <td class="check">✓</td>
+            <td class="x">✗</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="comp-name">ServiceNow AI Tower</div>
+              <div class="comp-tag">Governance Dashboard</div>
+            </td>
+            <td>Policy visibility & reporting<br><span style="color:#64748b">No runtime block</span></td>
+            <td class="x">✗</td>
+            <td class="check">✓</td>
+            <td class="x">✗</td>
+          </tr>
+          <tr class="playbook-row">
+            <td>
+              <div class="comp-name">PLAYBOOK</div>
+              <div class="comp-tag">AI Agent Security Platform</div>
+            </td>
+            <td><strong>Full incident lifecycle</strong><br><span style="color:#64748b">Detect → Classify → Judge → Enforce</span></td>
+            <td class="check">✓ <span style="color:#10b981">Auto-contain</span></td>
+            <td class="check">✓ <span style="color:#10b981">SHA-256 verified</span></td>
+            <td class="check">✓ <span style="color:#10b981">Zero LLM calls</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="differentiator">
+        <h3>🏆 The PLAYBOOK Difference</h3>
+        <p>
+          <strong>SupraWall asks:</strong> "Should this single request be allowed?"<br>
+          <strong>PLAYBOOK answers:</strong> "What is the full incident response lifecycle — from detection through forensics and compliance reporting?"<br><br>
+          We don't just block. We <strong>capture the agent's reasoning</strong>, document the evidence,
+          execute the playbook, and generate audit-ready compliance reports — all in <strong>under 200 milliseconds</strong>.
+        </p>
+      </div>
+    </div>
+    <div class="scroll-hint">▼ Live Demo</div>
+  </section>
+
+  <!-- SLIDE 3: DEMO START -->
+  <section class="slide" id="demo">
+    <div class="content demo-start">
+      <div class="logo" style="justify-content:center; margin-bottom:30px;">
+        <div class="logo-icon">P</div>
+      </div>
+      <h2>Live Demo: <span>PLAYBOOK in Action</span></h2>
+      <p>Watch us detect, classify, judge, and contain a live AI agent attack.<br>
+         Login: <code style="background:rgba(255,255,255,0.1);padding:4px 12px;border-radius:6px;">demo@playbook.local / demo123</code></p>
+      <a class="demo-btn" href="/">Start Demo →</a>
+    </div>
+  </section>
+
+  <div class="dots">
+    <div class="dot active"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <script>
+    const dots = document.querySelectorAll('.dot');
+    const slides = document.querySelectorAll('.slide');
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const idx = Array.from(slides).indexOf(entry.target);
+          dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+        }
+      });
+    }, { threshold: 0.5 });
+    slides.forEach(s => observer.observe(s));
+  </script>
+</body>
+</html>

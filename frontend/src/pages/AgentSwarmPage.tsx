@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   CheckCircle2,
+  XCircle,
   AlertTriangle,
   Loader2,
   Zap,
@@ -27,6 +28,8 @@ import {
   Flame,
   Skull,
   Target,
+  FileText,
+  UserCheck,
 } from 'lucide-react'
 
 interface Scenario {
@@ -65,6 +68,10 @@ function formatEventType(raw: string): string {
     incident_created: 'Incident Created',
     swarm_complete: 'Complete',
     swarm_stopped: 'Stopped',
+    human_review_required: 'Human Review Required',
+    human_review_approved: 'Human Review Approved',
+    human_review_denied: 'Human Review Denied',
+    agent_restarted: 'Agent Restarted',
   }
   return labels[raw] || raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
@@ -135,6 +142,37 @@ export default function AgentSwarmPage() {
   const [backendConnected, setBackendConnected] = useState(false)
   const [misbehaviorMode, setMisbehaviorMode] = useState(false)
   const [pulseIndex, setPulseIndex] = useState<number | null>(null)
+  const [pendingReviews, setPendingReviews] = useState<Array<{
+    review_id: string
+    agent_id: string
+    task_name: string
+    action_summary: string
+    verdict: string
+    rationale: string
+  }>>([])
+
+  // Policy template selector
+  const [templates, setTemplates] = useState<Array<{ id: string; template_id: string; name: string; description: string; odp_set?: Record<string, Record<string, string>> }>>([])
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+  // Fetch policy templates
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const res = await apiFetch(`${API_BASE}/policy-builder/templates`)
+        if (res.ok) {
+          const data = await res.json()
+          const list = Array.isArray(data) ? data : data?.data || []
+          setTemplates(list)
+        }
+      } catch {}
+    }
+    loadTemplates()
+    const onVisible = () => {
+      if (!document.hidden) loadTemplates()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
 
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -199,6 +237,23 @@ export default function AgentSwarmPage() {
               timestamp: Date.now(),
             },
           ])
+        } else if (data.event_type === 'HUMAN_REVIEW_REQUIRED') {
+          setPendingReviews((prev) => {
+            if (prev.some((r) => r.review_id === data.review_id)) return prev
+            return [
+              ...prev,
+              {
+                review_id: data.review_id,
+                agent_id: data.agent_id,
+                task_name: data.task_name,
+                action_summary: data.action_summary,
+                verdict: data.verdict,
+                rationale: data.rationale,
+              },
+            ]
+          })
+        } else if (data.event_type === 'human_review_approved' || data.event_type === 'human_review_denied') {
+          setPendingReviews((prev) => prev.filter((r) => r.agent_id !== data.agent_id))
         }
       } catch {
         // ignore
@@ -305,6 +360,7 @@ export default function AgentSwarmPage() {
           gcp_region: gcpRegion || undefined,
           model: selectedModel,
           misbehavior_mode: misbehaviorMode,
+          template_id: selectedTemplate || undefined,
         }),
       })
 
@@ -460,6 +516,57 @@ export default function AgentSwarmPage() {
           </h2>
 
           <div className="space-y-4">
+            {/* Policy Template Selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-blue-600" />
+                Policy Template
+              </label>
+              <select
+                value={selectedTemplate}
+                onChange={(e) => setSelectedTemplate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
+              >
+                <option value="">Default (NIST Baseline)</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.template_id} value={tpl.template_id}>
+                    {tpl.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Select an industry template to apply organizational ODP overrides for this swarm.
+              </p>
+              {selectedTemplate && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                  <span className="font-semibold">Selected:</span>{' '}
+                  {templates.find((t) => t.template_id === selectedTemplate)?.name || selectedTemplate}
+                  {(() => {
+                    const tpl = templates.find((t) => t.template_id === selectedTemplate)
+                    if (!tpl) return null
+                    const scenario = scenarios.find((s) => s.id === selectedScenario)
+                    if (!scenario) return null
+                    const incidentTypes = scenario.incident_type.includes(',')
+                      ? scenario.incident_type.split(',').map((s) => s.trim())
+                      : [scenario.incident_type]
+                    const matchingOdps = incidentTypes
+                      .map((it) => tpl.odp_set?.[it])
+                      .filter(Boolean)
+                    if (matchingOdps.length === 0) {
+                      return (
+                        <span className="block mt-1 text-gray-500">No ODP overrides for this scenario's incident types.</span>
+                      )
+                    }
+                    return (
+                      <span className="block mt-1">
+                        Overrides active for {incidentTypes.length} incident type{incidentTypes.length > 1 ? 's' : ''}.
+                      </span>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -744,6 +851,65 @@ export default function AgentSwarmPage() {
           )}
         </div>
       </div>
+
+      {/* Human Review Queue */}
+      {pendingReviews.length > 0 && (
+        <div className="card p-6 border-2 border-purple-400 bg-purple-50">
+          <div className="flex items-center gap-2 mb-4">
+            <UserCheck className="w-5 h-5 text-purple-600" />
+            <h2 className="text-lg font-semibold text-purple-900">Human Review Required — {pendingReviews.length} Pending</h2>
+          </div>
+          <div className="space-y-3">
+            {pendingReviews.map((review) => (
+              <div key={review.review_id} className="bg-white p-4 rounded-lg border border-purple-200">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Agent: <span className="font-mono">{review.agent_id}</span></p>
+                    <p className="text-sm text-gray-600 mt-0.5">Task: {review.task_name}</p>
+                    <p className="text-xs text-gray-500 mt-1 font-mono">{review.action_summary}</p>
+                    {review.rationale && (
+                      <p className="text-xs text-purple-700 mt-1">Rationale: {review.rationale}</p>
+                    )}
+                    <span className="inline-block mt-2 px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-bold rounded">
+                      {review.verdict}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (!sessionId) return
+                        try {
+                          const res = await apiFetch(`${API_BASE}/swarm/${sessionId}/human-review/${review.agent_id}/approve`, { method: 'POST' })
+                          if (res.ok) {
+                            setPendingReviews((prev) => prev.filter((r) => r.review_id !== review.review_id))
+                          }
+                        } catch {}
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Approve
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!sessionId) return
+                        try {
+                          const res = await apiFetch(`${API_BASE}/swarm/${sessionId}/human-review/${review.agent_id}/deny`, { method: 'POST' })
+                          if (res.ok) {
+                            setPendingReviews((prev) => prev.filter((r) => r.review_id !== review.review_id))
+                          }
+                        } catch {}
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700"
+                    >
+                      <XCircle className="w-4 h-4" /> Deny
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Event Feed */}
       <div className="card p-6">

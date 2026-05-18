@@ -36,3 +36,5 @@ freezegun==1.4.0
 # Linting & Type Checking
 ruff==0.1.15
 mypy==1.7.1
+
+google-genai>=1.0.0

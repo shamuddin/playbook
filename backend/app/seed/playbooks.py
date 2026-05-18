@@ -9,25 +9,25 @@ from app.core.constants import INCIDENT_TYPES, PlaybookActionType, IncidentSever
 # Action templates by severity
 SEVERITY_ACTIONS = {
     IncidentSeverity.CRITICAL: [
-        {"step_order": 1, "name": "Log Extended", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10},
-        {"step_order": 2, "name": "Isolate Agent", "action_type": PlaybookActionType.ISOLATE, "timeout_seconds": 30},
-        {"step_order": 3, "name": "Notify Security Team", "action_type": PlaybookActionType.NOTIFY, "timeout_seconds": 15},
-        {"step_order": 4, "name": "Capture Forensics", "action_type": PlaybookActionType.FORENSICS, "timeout_seconds": 60},
-        {"step_order": 5, "name": "Human Review", "action_type": PlaybookActionType.HUMAN_REVIEW, "timeout_seconds": 1800},
+        {"step_order": 1, "name": "Log Extended", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10, "parameters": {}},
+        {"step_order": 2, "name": "Isolate Agent", "action_type": PlaybookActionType.ISOLATE, "timeout_seconds": 30, "parameters": {}},
+        {"step_order": 3, "name": "Notify Security Team", "action_type": PlaybookActionType.NOTIFY, "timeout_seconds": 15, "parameters": {"channels": ["email"]}},
+        {"step_order": 4, "name": "Capture Forensics", "action_type": PlaybookActionType.FORENSICS, "timeout_seconds": 60, "parameters": {}},
+        {"step_order": 5, "name": "Human Review", "action_type": PlaybookActionType.HUMAN_REVIEW, "timeout_seconds": 1800, "parameters": {}},
     ],
     IncidentSeverity.HIGH: [
-        {"step_order": 1, "name": "Log Extended", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10},
-        {"step_order": 2, "name": "Quarantine Agent", "action_type": PlaybookActionType.QUARANTINE, "timeout_seconds": 30},
-        {"step_order": 3, "name": "Notify Team", "action_type": PlaybookActionType.NOTIFY, "timeout_seconds": 15},
-        {"step_order": 4, "name": "Capture Forensics", "action_type": PlaybookActionType.FORENSICS, "timeout_seconds": 60},
+        {"step_order": 1, "name": "Log Extended", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10, "parameters": {}},
+        {"step_order": 2, "name": "Quarantine Agent", "action_type": PlaybookActionType.QUARANTINE, "timeout_seconds": 30, "parameters": {}},
+        {"step_order": 3, "name": "Notify Team", "action_type": PlaybookActionType.NOTIFY, "timeout_seconds": 15, "parameters": {"channels": ["email"]}},
+        {"step_order": 4, "name": "Capture Forensics", "action_type": PlaybookActionType.FORENSICS, "timeout_seconds": 60, "parameters": {}},
     ],
     IncidentSeverity.MEDIUM: [
-        {"step_order": 1, "name": "Log Event", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10},
-        {"step_order": 2, "name": "Rate Limit", "action_type": PlaybookActionType.RATE_LIMIT, "timeout_seconds": 15},
-        {"step_order": 3, "name": "Notify", "action_type": PlaybookActionType.NOTIFY, "timeout_seconds": 15},
+        {"step_order": 1, "name": "Log Event", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10, "parameters": {}},
+        {"step_order": 2, "name": "Rate Limit", "action_type": PlaybookActionType.RATE_LIMIT, "timeout_seconds": 15, "parameters": {}},
+        {"step_order": 3, "name": "Notify", "action_type": PlaybookActionType.NOTIFY, "timeout_seconds": 15, "parameters": {"channels": ["email"]}},
     ],
     IncidentSeverity.LOW: [
-        {"step_order": 1, "name": "Log Event", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10},
+        {"step_order": 1, "name": "Log Event", "action_type": PlaybookActionType.LOG_EXTENDED, "timeout_seconds": 10, "parameters": {}},
     ],
 }
 

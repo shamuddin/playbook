@@ -61,6 +61,8 @@ class IncidentBase(BaseModel):
 
 class IncidentCreate(IncidentBase):
     event_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    swarm_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -354,6 +356,15 @@ class TemplateApplyResponse(BaseModel):
     results: List[TemplateApplyResult] = Field(default_factory=list)
     total_applied: int
     total_conflicts: int
+
+
+class TemplateCreateResponse(BaseModel):
+    """Response after creating a custom template."""
+    id: str
+    template_id: str
+    name: str
+    description: Optional[str] = None
+    odp_set: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
 
 class RollbackBody(BaseModel):

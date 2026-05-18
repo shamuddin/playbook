@@ -13,12 +13,41 @@ import {
   UserCheck,
   Sparkles,
   Loader2,
+  MessageSquare,
+  Bot,
+  Gavel,
+  Terminal,
+  Eye,
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
 import { apiFetch } from '../utils/api'
 
 const API_BASE = getApiBase()
+
+const INCIDENT_TYPE_NAMES: Record<string, string> = {
+  'AGT-DEL-001': 'Data Destruction',
+  'AGT-FIN-002': 'Unauthorized Financial',
+  'AGT-PER-003': 'Permission Escalation',
+  'AGT-HRM-004': 'Harmful Output',
+  'AGT-EXT-005': 'Data Exfiltration',
+  'AGT-INJ-006': 'Prompt Injection',
+  'AGT-HAL-007': 'Hallucination Cascade',
+  'AGT-CRE-008': 'Credential Exposure',
+  'AGT-RAT-009': 'Rate Limit Abuse',
+  'AGT-DRF-010': 'Model Drift',
+  'AGT-TLM-011': 'Tool Misuse',
+  'AGT-GAP-012': 'Coverage Gap',
+  'AGT-SPY-013': 'Systematic Espionage',
+  'AGT-BYP-014': 'Guardrail Bypass',
+  'AGT-PRV-015': 'Privacy Violation',
+  'AGT-REG-016': 'Regulatory Trigger',
+  'AGT-POL-017': 'Organization Policy Switching',
+}
+
+function getIncidentName(code: string): string {
+  return INCIDENT_TYPE_NAMES[code] || code
+}
 
 interface Incident {
   id: string
@@ -66,6 +95,7 @@ export default function IncidentDetailPage() {
   const [incident, setIncident] = useState<Incident | null>(null)
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [forensics, setForensics] = useState<ForensicsData | null>(null)
+  const [metadata, setMetadata] = useState<any>(null)
   const [timelineError, setTimelineError] = useState(false)
   const [forensicsError, setForensicsError] = useState(false)
   const [loadError, setLoadError] = useState(false)
@@ -85,10 +115,11 @@ export default function IncidentDetailPage() {
     setTimelineError(false)
     setForensicsError(false)
     try {
-      const [incRes, tlRes, forenRes] = await Promise.all([
+      const [incRes, tlRes, forenRes, metaRes] = await Promise.all([
         apiFetch(`${API_BASE}/incidents/${id}`),
         apiFetch(`${API_BASE}/incidents/${id}/timeline`),
         apiFetch(`${API_BASE}/incidents/${id}/forensics`),
+        apiFetch(`${API_BASE}/incidents/${id}/metadata`),
       ])
       if (incRes.ok) {
         setIncident(await incRes.json())
@@ -104,6 +135,10 @@ export default function IncidentDetailPage() {
         setForensics((await forenRes.json()).data || null)
       } else {
         setForensicsError(true)
+      }
+      if (metaRes.ok) {
+        const metaData = await metaRes.json()
+        setMetadata(metaData.data || null)
       }
     } catch {
       setLoadError(true)
@@ -213,7 +248,7 @@ export default function IncidentDetailPage() {
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-white p-3 rounded-lg border border-orange-200 text-center">
               <p className="text-xs text-gray-500">Agent</p>
-              <p className="text-sm font-mono font-medium text-gray-900 truncate">{incident.agent_id || 'N/A'}</p>
+              <p className="text-sm font-mono font-medium text-gray-900 truncate">{metadata?.agent_id || incident.agent_id || 'N/A'}</p>
             </div>
             <div className="bg-white p-3 rounded-lg border border-orange-200 text-center">
               <p className="text-xs text-gray-500">Status</p>
@@ -238,14 +273,15 @@ export default function IncidentDetailPage() {
               <span className="text-xs text-gray-500 font-mono">{incident.incident_id}</span>
             </div>
             <h1 className="text-xl font-bold text-gray-900">
-              {incident.incident_type}
+              {getIncidentName(incident.incident_type)}
+              <span className="ml-2 text-sm font-normal text-gray-500 font-mono">({incident.incident_type})</span>
             </h1>
             <p className="text-sm text-gray-600 mt-1">Event: {incident.event_id || 'Unknown'}</p>
-            {incident.agent_id && (
-              <p className="text-sm text-gray-600 mt-0.5">Agent: {incident.agent_id}</p>
+            {(incident.agent_id || metadata?.agent_id) && (
+              <p className="text-sm text-gray-600 mt-0.5">Agent: {metadata?.agent_id || incident.agent_id}</p>
             )}
-            {incident.swarm_id && (
-              <p className="text-sm text-gray-600 mt-0.5">Swarm: {incident.swarm_id}</p>
+            {(incident.swarm_id || metadata?.session_id) && (
+              <p className="text-sm text-gray-600 mt-0.5">Swarm: {metadata?.session_id || incident.swarm_id}</p>
             )}
           </div>
           <div className="text-right">
@@ -258,11 +294,219 @@ export default function IncidentDetailPage() {
               {verdictIcon(incident.judge_verdict)}
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              {new Date(incident.created_at).toLocaleString()}
+              {new Date(incident.created_at).toLocaleString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                timeZoneName: 'short'
+              })}
             </p>
           </div>
         </div>
       </div>
+
+      {/* Captured Agent Communication — Prominent Evidence Display */}
+      {metadata && (metadata.prompt || metadata.reasoning || metadata.tool_call || metadata.output || metadata.judge_rationale) && (
+        <div className="card p-5 border-2 border-red-400 bg-red-50 shadow-md">
+          <div className="flex items-center gap-2 mb-4">
+            <Eye className="w-5 h-5 text-red-600" />
+            <h2 className="text-lg font-bold text-red-900 uppercase tracking-wide">Captured Agent Communication</h2>
+            <span className="ml-auto px-2 py-0.5 bg-red-200 text-red-800 text-[10px] font-bold uppercase rounded">
+              Evidence
+            </span>
+          </div>
+
+          {/* Agent Identity Banner */}
+          <div className="bg-white p-4 rounded-lg border border-red-200 mb-4">
+            <p className="text-sm text-gray-900">
+              <span className="font-bold text-red-700">Agent {metadata.agent_id || incident.agent_id || 'Unknown'}</span>
+              {' '}attempted{' '}
+              <span className="font-bold text-red-700">{getIncidentName(incident.incident_type)}</span>
+              {' '}({incident.incident_type}) via swarm/session{' '}
+              <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{metadata.session_id || incident.swarm_id || 'N/A'}</span>
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Below is the complete captured communication at the exact moment the Judge Layer blocked this action.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Agent Thought / Reasoning */}
+            {(metadata.reasoning || metadata.prompt) && (
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center pt-1">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                    <Bot className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div className="w-0.5 flex-1 bg-blue-200 my-1" />
+                </div>
+                <div className="flex-1 pb-2">
+                  <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Agent Reasoning</p>
+                  {metadata.reasoning && (
+                    <div className="bg-white p-3 rounded-lg border border-blue-200">
+                      <p className="text-sm text-gray-800 whitespace-pre-wrap">{metadata.reasoning}</p>
+                    </div>
+                  )}
+                  {metadata.prompt && !metadata.reasoning && (
+                    <div className="bg-white p-3 rounded-lg border border-blue-200">
+                      <p className="text-sm text-gray-800 whitespace-pre-wrap">{metadata.prompt}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Agent Command / Tool Call — THE BLOCKED ACTION */}
+            {metadata.tool_call && (
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center pt-1">
+                  <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                    <Terminal className="w-4 h-4 text-orange-600" />
+                  </div>
+                  <div className="w-0.5 flex-1 bg-orange-200 my-1" />
+                </div>
+                <div className="flex-1 pb-2">
+                  <p className="text-xs font-bold text-orange-700 uppercase tracking-wide mb-1">Command / Tool Call</p>
+                  <div className="bg-white p-3 rounded-lg border-2 border-red-300 shadow-sm">
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap font-mono bg-gray-50 p-2 rounded border border-gray-200">
+                      {metadata.tool_call}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Agent Output (if any) */}
+            {metadata.output && (
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center pt-1">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+                    <MessageSquare className="w-4 h-4 text-gray-600" />
+                  </div>
+                  <div className="w-0.5 flex-1 bg-gray-200 my-1" />
+                </div>
+                <div className="flex-1 pb-2">
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-1">Agent Output</p>
+                  <div className="bg-white p-3 rounded-lg border border-gray-200">
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap font-mono bg-gray-50 p-2 rounded">{metadata.output}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Judge Verdict */}
+            <div className="flex gap-3">
+              <div className="flex flex-col items-center pt-1">
+                <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                  <Gavel className="w-4 h-4 text-purple-600" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-1">Judge Layer Verdict</p>
+                <div className="bg-white p-3 rounded-lg border border-purple-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    {metadata.judge_verdict === 'ALLOW' && <CheckCircle className="w-4 h-4 text-green-500" />}
+                    {metadata.judge_verdict === 'DENY' && <XCircle className="w-4 h-4 text-red-500" />}
+                    {metadata.judge_verdict === 'QUARANTINE' && <Ban className="w-4 h-4 text-orange-500" />}
+                    {metadata.judge_verdict === 'ESCALATE' && <UserCheck className="w-4 h-4 text-purple-500" />}
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
+                      metadata.judge_verdict === 'DENY' ? 'bg-red-100 text-red-700' :
+                      metadata.judge_verdict === 'ALLOW' ? 'bg-green-100 text-green-700' :
+                      metadata.judge_verdict === 'QUARANTINE' ? 'bg-orange-100 text-orange-700' :
+                      'bg-purple-100 text-purple-700'
+                    }`}>
+                      {metadata.judge_verdict || 'PENDING'}
+                    </span>
+                  </div>
+                  {metadata.judge_rationale && (
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{metadata.judge_rationale}</p>
+                  )}
+                  {!metadata.judge_rationale && (
+                    <p className="text-sm text-gray-500">No rationale recorded for this verdict.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Capture timestamp */}
+          <div className="mt-4 pt-3 border-t border-red-200 flex items-center gap-2 text-xs text-red-700">
+            <Clock className="w-3.5 h-3.5" />
+            <span className="font-mono">
+              Captured at {metadata.timestamp
+                ? new Date(metadata.timestamp).toLocaleString(undefined, {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    timeZoneName: 'short'
+                  })
+                : new Date(incident.created_at).toLocaleString(undefined, {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    timeZoneName: 'short'
+                  })}
+            </span>
+            <span className="ml-auto text-red-500">Source: {metadata.event_source || 'unknown'}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Agent Prompt & Context (full details) */}
+      {metadata && (
+        <div className="card p-5 border-l-4 border-blue-500 bg-blue-50">
+          <h2 className="text-lg font-semibold text-blue-900 mb-3 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-600" />
+            Incident Context
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white p-3 rounded-lg border border-blue-200">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Detected At</p>
+              <p className="text-sm text-gray-900">
+                {metadata.timestamp
+                  ? new Date(metadata.timestamp).toLocaleString(undefined, {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit', second: '2-digit',
+                      timeZoneName: 'short'
+                    })
+                  : new Date(incident.created_at).toLocaleString(undefined, {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit', second: '2-digit',
+                      timeZoneName: 'short'
+                    })}
+              </p>
+            </div>
+            {metadata.agent_id && (
+              <div className="bg-white p-3 rounded-lg border border-blue-200">
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Agent</p>
+                <p className="text-sm text-gray-900 font-mono">{metadata.agent_id}</p>
+              </div>
+            )}
+            {metadata.session_id && (
+              <div className="bg-white p-3 rounded-lg border border-blue-200">
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Session</p>
+                <p className="text-sm text-gray-900 font-mono truncate">{metadata.session_id}</p>
+              </div>
+            )}
+            {metadata.event_type && (
+              <div className="bg-white p-3 rounded-lg border border-blue-200">
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Event Type</p>
+                <p className="text-sm text-gray-900">{metadata.event_type}</p>
+              </div>
+            )}
+          </div>
+          {/* Only show prompt/tool_call/output here if NOT already shown in Captured Communication */}
+          {metadata.prompt && !metadata.reasoning && (
+            <div className="mt-3 bg-white p-3 rounded-lg border border-blue-200">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Agent Prompt / Situation</p>
+              <p className="text-sm text-gray-900 whitespace-pre-wrap font-mono bg-gray-50 p-2 rounded">{metadata.prompt}</p>
+            </div>
+          )}
+          {!metadata.tool_call && metadata.output && (
+            <div className="mt-3 bg-white p-3 rounded-lg border border-blue-200">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Output</p>
+              <p className="text-sm text-gray-900 whitespace-pre-wrap font-mono bg-gray-50 p-2 rounded">{metadata.output}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pipeline Visualization */}
       <PipelineVisualization
@@ -338,7 +582,11 @@ export default function IncidentDetailPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-500">{event.stage}</span>
                       <span className="text-xs text-gray-400">
-                        {new Date(event.timestamp).toLocaleTimeString()}
+                        {new Date(event.timestamp).toLocaleString(undefined, {
+                          year: 'numeric', month: 'short', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit', second: '2-digit',
+                          timeZoneName: 'short'
+                        })}
                       </span>
                     </div>
                     <p className="text-sm text-gray-900 mt-0.5">{event.event_description}</p>

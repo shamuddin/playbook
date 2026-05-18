@@ -25,6 +25,30 @@ _stderr_task: Optional[asyncio.Task] = None
 _probe_task: Optional[asyncio.Task] = None
 _lt_status: dict = {}
 
+# Active agent IDs — Lobster Trap only creates incidents for these agents
+_active_agent_ids: set[str] = set()
+
+
+def register_active_agent(agent_id: str) -> None:
+    """Mark an agent as active so Lobster Trap will process its traffic."""
+    if agent_id:
+        _active_agent_ids.add(agent_id)
+
+
+def unregister_active_agent(agent_id: str) -> None:
+    """Mark an agent as inactive so Lobster Trap will ignore its traffic."""
+    _active_agent_ids.discard(agent_id)
+
+
+def is_agent_active(agent_id: str) -> bool:
+    """Check if an agent is currently active."""
+    return agent_id in _active_agent_ids
+
+
+def get_active_agents() -> list[str]:
+    """Return list of currently active agent IDs."""
+    return list(_active_agent_ids)
+
 
 def _repo_root() -> Path:
     """Resolve the repository root from this file's location."""
@@ -92,7 +116,7 @@ async def start_lobstertrap_proxy() -> dict:
         audit.write_text("")
 
     port = 8080
-    listen = f":{port}"
+    listen = f"127.0.0.1:{port}"
 
     if not binary.exists():
         _lt_status = {
@@ -154,8 +178,7 @@ async def start_lobstertrap_proxy() -> dict:
     _stdout_task = asyncio.create_task(_drain_pipe(proc.stdout))
     _stderr_task = asyncio.create_task(_drain_pipe(proc.stderr))
 
-    # Start HTTP probe to generate real DPI traffic
-    _probe_task = asyncio.create_task(_probe_loop())
+    # No probe loop — DPI only captures real agent traffic from the swarm simulator
 
     _lt_status = {
         "running": proc.returncode is None,
@@ -266,10 +289,15 @@ async def read_lobstertrap_logs(
                             continue
                         event = _transform_entry(raw)
                         if event is not None:
-                            try:
-                                await on_event(event)
-                            except Exception as exc:
-                                print(f"[lobstertrap] Event handler error: {exc}")
+                            # Filter: only process events from active agents
+                            if not is_agent_active(event.agent_id) and event.agent_id != "lobstertrap-proxy":
+                                # Skip inactive agents — but still track file position
+                                pass
+                            else:
+                                try:
+                                    await on_event(event)
+                                except Exception as exc:
+                                    print(f"[lobstertrap] Event handler error: {exc}")
                     file_pos = f.tell()
             elif current_size < file_pos:
                 # Log rotated / truncated
@@ -286,11 +314,16 @@ def _transform_entry(raw: dict) -> Optional[PB_CES_Event]:
     metadata = raw.get("metadata", {})
     action = raw.get("action", "UNKNOWN")
 
+    # Extract real agent_id from metadata (swarm simulators include it in the request body)
+    agent_id = "lobstertrap-proxy"
+    if isinstance(metadata, dict):
+        agent_id = metadata.get("agent_id") or raw.get("agent_id") or agent_id
+
     lt_raw = {
         "event_id": request_id,
         "source": "lobstertrap",
         "action": raw.get("direction", "ingress"),
-        "agent_id": "lobstertrap-proxy",
+        "agent_id": agent_id,
         "session_id": request_id,
         "tool": raw.get("matched_rule", "") or raw.get("rule_name", ""),
         "input": json.dumps(metadata) if isinstance(metadata, dict) else str(metadata),
@@ -470,7 +503,7 @@ def get_lobstertrap_stats() -> dict:
 
                 total += 1
                 action = (entry.get("action") or "").upper()
-                if action == "BLOCK":
+                if action in ("BLOCK", "DENY"):
                     blocked += 1
                 elif action == "ALLOW":
                     allowed += 1

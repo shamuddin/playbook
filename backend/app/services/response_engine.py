@@ -166,10 +166,99 @@ class ResponseEngine:
                 targets = action.parameters.get("targets", ["#security-alerts"])
                 from app.services.notification_service import NotificationService
                 from app.core.config import get_settings
+                from app.models import NistBaseline, OrganizationODP, IncidentMetadata, JudgeDecision
+                from app.services.email_templates import incident_alert_html
+                from sqlalchemy import select
 
                 service = NotificationService()
                 settings = get_settings()
                 channels = action.parameters.get("channels", settings.notification_default_channels)
+
+                # Fetch ODP escalation contacts for email notifications
+                to_addrs = None
+                try:
+                    baseline_result = await db.execute(
+                        select(NistBaseline).where(NistBaseline.incident_type == incident.incident_type)
+                    )
+                    baseline = baseline_result.scalar_one_or_none()
+                    if baseline:
+                        odp_result = await db.execute(
+                            select(OrganizationODP).where(
+                                OrganizationODP.baseline_id == baseline.id,
+                                OrganizationODP.odp_key == "escalation_contacts",
+                            )
+                        )
+                        odp = odp_result.scalar_one_or_none()
+                        if odp and odp.odp_value:
+                            try:
+                                contacts = json.loads(odp.odp_value)
+                                if isinstance(contacts, list) and contacts:
+                                    to_addrs = contacts
+                            except Exception:
+                                pass
+                        # Fallback to baseline default if no ODP override
+                        if not to_addrs and baseline.escalation_contacts:
+                            to_addrs = baseline.escalation_contacts
+                except Exception:
+                    pass
+
+                # Load metadata for rich email content
+                reasoning = None
+                tool_call = None
+                try:
+                    meta_result = await db.execute(
+                        select(IncidentMetadata).where(IncidentMetadata.incident_id == incident.id)
+                    )
+                    meta = meta_result.scalar_one_or_none()
+                    if meta and meta.full_metadata_json:
+                        event_raw = meta.full_metadata_json.get("event_raw", {})
+                        event_meta = event_raw.get("metadata", {}) if isinstance(event_raw, dict) else {}
+                        reasoning = (
+                            event_meta.get("agent_thought")
+                            or event_meta.get("reasoning")
+                            or event_meta.get("situation")
+                        )
+                        tool = event_raw.get("tool", "")
+                        inp = event_raw.get("input", "")
+                        if tool and inp:
+                            tool_call = f"{tool} {inp}"
+                        elif tool:
+                            tool_call = tool
+                        elif inp:
+                            tool_call = inp
+                except Exception:
+                    pass
+
+                # Load judge decision for email
+                judge_verdict = None
+                judge_rationale = None
+                try:
+                    if incident.judge_decision_id:
+                        jd_result = await db.execute(
+                            select(JudgeDecision).where(JudgeDecision.id == incident.judge_decision_id)
+                        )
+                        jd = jd_result.scalar_one_or_none()
+                        if jd:
+                            judge_verdict = jd.verdict
+                            judge_rationale = jd.rationale
+                except Exception:
+                    pass
+
+                # Build rich HTML email
+                html_body = incident_alert_html(
+                    incident_id=incident.incident_id,
+                    incident_type=incident.incident_type,
+                    incident_type_name=incident.incident_type,
+                    severity=incident.severity,
+                    agent_id=incident.agent_id,
+                    swarm_id=incident.swarm_id,
+                    reasoning=reasoning,
+                    tool_call=tool_call,
+                    judge_verdict=judge_verdict,
+                    judge_rationale=judge_rationale,
+                    timestamp=incident.created_at.isoformat() if incident.created_at else None,
+                )
+
                 msg = {
                     "title": f"PLAYBOOK Alert: {incident.severity.upper()} {incident.incident_type}",
                     "body": (
@@ -179,8 +268,10 @@ class ResponseEngine:
                         f"Confidence: {incident.confidence:.2f}\n"
                         f"Targets: {targets}"
                     ),
+                    "html_body": html_body,
                     "severity": incident.severity,
                     "incident_id": incident.incident_id,
+                    "to": to_addrs,
                 }
                 results = await service.send_multi(channels=channels, message=msg)
                 await service.close()

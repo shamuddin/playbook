@@ -73,3 +73,23 @@ alembic.ini
 tmp/
 temp/
 projectdocs_V3.0
+
+# Root-level development artifacts (screenshots, temp scripts, e2e dumps)
+/*.png
+/*.jpg
+/*.jpeg
+/e2e_*.json
+/webbridge_*.json
+/rigorous_*.png
+/screenshot_*.png
+/*.pid
+/*_err.log
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Production env files
+.env.production
+
+# Misc junk
+EOF

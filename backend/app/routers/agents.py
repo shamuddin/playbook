@@ -14,8 +14,28 @@ from app.database import get_db
 from app.models import Agent, AgentHealthHistory, Incident
 from app.models import utc_now
 from app.schemas import StandardResponse
+from app.services.lobstertrap_integration import register_active_agent, unregister_active_agent
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+def _agent_category(system_id: str) -> str:
+    """Derive agent category from system_id prefix/pattern."""
+    sid = system_id.lower()
+    if sid.startswith("demo-"):
+        return "Demo Agents"
+    if sid.startswith("pg-"):
+        return "Playground Agents"
+    if sid in ("fx-trader", "data-analyst", "support-bot", "meta-infra-agent",
+               "replit-analytics-pipeline", "openai-support-bot", "github-copilot-integration",
+               "pocketos-migration-bot", "step-finance-trader-v3", "uhg-care-recommender",
+               "multi-tenant-etl-agent"):
+        return "Swarm Agents"
+    if sid.startswith("lobstertrap"):
+        return "DPI Proxy"
+    if sid == "warmup":
+        return "System"
+    return "Production Agents"
 
 
 @router.get("", response_model=StandardResponse)
@@ -126,6 +146,7 @@ async def list_agents(
             "suprawall_connected": agent.suprawall_connected,
             "is_active": agent.is_active,
             "status": _agent_status(agent),
+            "category": _agent_category(agent.system_id),
             "last_seen": agent.updated_at.isoformat() if agent.updated_at else None,
             "created_at": agent.created_at.isoformat() if agent.created_at else None,
             "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
@@ -161,6 +182,7 @@ async def list_agents(
                     "suprawall_connected": False,
                     "is_active": True,
                     "status": "degraded",
+                    "category": _agent_category(agent_id),
                     "last_seen": None,
                     "created_at": None,
                     "updated_at": None,
@@ -216,6 +238,7 @@ async def get_agent(
             "suprawall_connected": agent.suprawall_connected,
             "is_active": agent.is_active,
             "status": status_str,
+            "category": _agent_category(agent.system_id),
             "last_seen": agent.updated_at.isoformat() if agent.updated_at else None,
             "created_at": agent.created_at.isoformat() if agent.created_at else None,
             "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
@@ -441,6 +464,9 @@ async def agent_heartbeat(
         agent.health_score = int(data.get("health_score", agent.health_score))
         agent.last_seen = utc_now()
 
+    # Register as active for Lobster Trap filtering
+    register_active_agent(agent_id)
+
     # Log heartbeat
     heartbeat = AgentHealthHistory(
         agent_id=agent.id,
@@ -454,5 +480,5 @@ async def agent_heartbeat(
 
     return StandardResponse(
         success=True,
-        data={"agent_id": agent_id, "status": "online", "health_score": agent.health_score},
+        data={"agent_id": agent_id, "status": "online", "health_score": agent.health_score, "category": _agent_category(agent_id)},
     )

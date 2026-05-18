@@ -10,6 +10,10 @@ import {
   Activity,
   Save,
   RotateCcw,
+  Eye,
+  EyeOff,
+  Edit3,
+  Layers,
 } from 'lucide-react'
 
 import { getApiBase } from '../utils/config'
@@ -40,6 +44,31 @@ const INCIDENT_TYPE_NAMES: Record<string, string> = {
 
 function getIncidentName(code: string): string {
   return INCIDENT_TYPE_NAMES[code] || code
+}
+
+// Convert JSON array string to comma-separated display string
+function jsonToCsv(jsonStr: string): string {
+  try {
+    const arr = JSON.parse(jsonStr)
+    if (Array.isArray(arr)) return arr.join(', ')
+  } catch {}
+  return jsonStr
+}
+
+// Convert comma-separated string to JSON array string (validates emails for escalation)
+function csvToJson(csvStr: string, validateEmails = false): { value: string; error?: string } {
+  const items = csvStr
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  if (validateEmails) {
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const invalid = items.filter((email) => !emailRe.test(email))
+    if (invalid.length > 0) {
+      return { value: JSON.stringify(items), error: `Invalid emails: ${invalid.join(', ')}` }
+    }
+  }
+  return { value: JSON.stringify(items) }
 }
 
 interface Template {
@@ -94,10 +123,10 @@ function baselineToForm(base: Baseline): ODPFormState {
   return {
     severity_threshold: base.severity,
     auto_contain_enabled: String(base.auto_contain_enabled),
-    escalation_contacts: JSON.stringify(base.escalation_contacts || []),
+    escalation_contacts: jsonToCsv(JSON.stringify(base.escalation_contacts || [])),
     response_time_sla: String(base.response_time_sla_seconds),
     forensic_level: base.forensic_level,
-    notify_targets: JSON.stringify(base.notify_targets || []),
+    notify_targets: jsonToCsv(JSON.stringify(base.notify_targets || [])),
     compliance_report: String(base.compliance_report),
     record_threshold: String(base.record_threshold),
   }
@@ -122,14 +151,38 @@ export default function PolicyBuilderPage() {
   const [compareLoading, setCompareLoading] = useState(false)
   const [showComparison, setShowComparison] = useState(false)
 
+  // Saved ODPs state
+  const [odpsList, setOdpsList] = useState<Array<{ id: string; baseline_id: string; odp_key: string; odp_value: string }>>([])
+  const [showSavedOdps, setShowSavedOdps] = useState(false)
+
+  const fetchOdps = async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/policy-builder/odps`)
+      if (res.ok) {
+        const data = await res.json()
+        setOdpsList(data.data?.items || [])
+      }
+    } catch {}
+  }
+
+  const fetchTemplates = async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/policy-builder/templates`)
+      if (res.ok) {
+        const data = await res.json()
+        setTemplates(Array.isArray(data) ? data : data?.data || [])
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     Promise.all([
-      apiFetch(`${API_BASE}/policy-builder/templates`).then((r) => (r.ok ? r.json() : [])),
+      fetchTemplates(),
       apiFetch(`${API_BASE}/policy-builder/nist-baseline`).then((r) => (r.ok ? r.json() : { data: {} })),
+      fetchOdps(),
     ])
-      .then(([tplRes, baseRes]) => {
+      .then(([, baseRes]) => {
         const loadedBaselines = baseRes.data?.items || []
-        setTemplates(tplRes || [])
         setBaselines(loadedBaselines)
         setLoading(false)
         fetchConflicts(loadedBaselines).catch(() => {})
@@ -196,14 +249,20 @@ export default function PolicyBuilderPage() {
     if (!form) return
     setSavingOdp(incidentType)
     try {
+      const emailResult = csvToJson(form.escalation_contacts, true)
+      if (emailResult.error) {
+        alert(emailResult.error)
+        setSavingOdp('')
+        return
+      }
       const payload = {
         odps: {
           severity_threshold: form.severity_threshold,
           auto_contain_enabled: form.auto_contain_enabled === 'true' ? 'true' : 'false',
-          escalation_contacts: form.escalation_contacts,
+          escalation_contacts: emailResult.value,
           response_time_sla_seconds: String(parseInt(form.response_time_sla, 10) || 0),
           forensic_level: form.forensic_level,
-          notify_targets: form.notify_targets,
+          notify_targets: csvToJson(form.notify_targets).value,
           compliance_report: form.compliance_report === 'true' ? 'true' : 'false',
           record_threshold: String(parseInt(form.record_threshold, 10) || 0),
         },
@@ -282,6 +341,85 @@ export default function PolicyBuilderPage() {
         </div>
       </div>
 
+      {/* Saved Organization ODPs */}
+      <div className="card p-4 border-l-4 border-blue-500">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Layers className="w-5 h-5 text-blue-600" />
+            <h2 className="text-lg font-semibold text-gray-900">Saved Organization ODPs</h2>
+          </div>
+          <button
+            onClick={() => setShowSavedOdps(!showSavedOdps)}
+            className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+          >
+            {showSavedOdps ? (
+              <>
+                <EyeOff className="w-4 h-4" /> Hide
+              </>
+            ) : (
+              <>
+                <Eye className="w-4 h-4" /> Show {odpsList.length} Override{odpsList.length !== 1 ? 's' : ''}
+              </>
+            )}
+          </button>
+        </div>
+        {!showSavedOdps && odpsList.length === 0 && (
+          <p className="text-sm text-gray-500">No custom ODPs saved yet. Use the Custom Organization Policy builder below to create your first policy.</p>
+        )}
+        {showSavedOdps && (
+          <div className="space-y-3">
+            {(() => {
+              // Group ODPs by incident type
+              const grouped: Record<string, Array<{ key: string; value: string }>> = {}
+              for (const odp of odpsList) {
+                const baseline = baselines.find((b) => b.id === odp.baseline_id)
+                const incidentType = baseline?.incident_type || odp.baseline_id
+                if (!grouped[incidentType]) grouped[incidentType] = []
+                grouped[incidentType].push({ key: odp.odp_key, value: odp.odp_value })
+              }
+              const types = Object.keys(grouped)
+              if (types.length === 0) {
+                return <p className="text-sm text-gray-500">No custom ODPs saved yet.</p>
+              }
+              return types.map((incidentType) => {
+                const baseline = baselines.find((b) => b.incident_type === incidentType)
+                return (
+                  <div key={incidentType} className="border border-gray-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded">
+                        {incidentType}
+                      </span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {getIncidentName(incidentType)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {grouped[incidentType].map((o) => {
+                        const defaultVal = baseline
+                          ? String((baseline as any)[o.key] ?? (baseline as any)[o.key.replace('_seconds', '')] ?? '')
+                          : ''
+                        const isChanged = defaultVal !== o.value
+                        return (
+                          <div key={o.key} className="text-xs">
+                            <span className="text-gray-500">{o.key}:</span>{' '}
+                            <span className={isChanged ? 'text-blue-700 font-medium' : 'text-gray-700'}>
+                              {o.value}
+                            </span>
+                            {isChanged && (
+                              <span className="text-gray-400 ml-1">(was {defaultVal})</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })
+            })()}
+          </div>
+        )}
+      </div>
+
       {/* Custom Organization Policy Builder */}
       <div className="card p-4 border-l-4 border-green-500">
         <div className="flex items-center gap-2 mb-3">
@@ -296,6 +434,8 @@ export default function PolicyBuilderPage() {
           onCreated={() => {
             fetchBaselines()
             fetchConflicts()
+            fetchOdps()
+            fetchTemplates()
           }}
         />
       </div>
@@ -555,9 +695,14 @@ function OdpEditorForm({
 }) {
   const form = value ?? baselineToForm(base)
   const hasConflicts = conflicts.length > 0
+  const [emailError, setEmailError] = useState('')
 
   const update = (patch: Partial<ODPFormState>) => {
     onChange({ ...form, ...patch })
+    if (patch.escalation_contacts !== undefined) {
+      const result = csvToJson(patch.escalation_contacts, true)
+      setEmailError(result.error || '')
+    }
   }
 
   return (
@@ -679,28 +824,31 @@ function OdpEditorForm({
         {/* Escalation Contacts */}
         <div className="lg:col-span-2">
           <label className="block text-xs font-medium text-gray-500 mb-1">
-            Escalation Contacts (JSON array)
+            Escalation Contacts (comma-separated emails)
           </label>
           <input
             type="text"
             value={form.escalation_contacts}
             onChange={(e) => update({ escalation_contacts: e.target.value })}
-            placeholder='["security@company.com"]'
-            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder='security@company.com, ciso@company.com'
+            className={`w-full px-2 py-1.5 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${emailError ? 'border-red-400' : 'border-gray-200'}`}
           />
+          {emailError && (
+            <p className="text-xs text-red-600 mt-1">{emailError}</p>
+          )}
         </div>
 
         {/* Notify Targets */}
         <div className="lg:col-span-2">
           <label className="block text-xs font-medium text-gray-500 mb-1">
-            Notify Targets (JSON array)
+            Notify Targets (comma-separated channels)
           </label>
           <input
             type="text"
             value={form.notify_targets}
             onChange={(e) => update({ notify_targets: e.target.value })}
-            placeholder='["pagerduty"]'
-            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder='slack, email, pagerduty'
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
       </div>
@@ -727,6 +875,19 @@ function OdpEditorForm({
   )
 }
 
+function baselineToOdpDefaults(base: Baseline): ODPFormState {
+  return {
+    severity_threshold: base.severity,
+    auto_contain_enabled: String(base.auto_contain_enabled),
+    escalation_contacts: jsonToCsv(JSON.stringify(base.escalation_contacts || [])),
+    response_time_sla: String(base.response_time_sla_seconds),
+    forensic_level: base.forensic_level,
+    notify_targets: jsonToCsv(JSON.stringify(base.notify_targets || [])),
+    compliance_report: String(base.compliance_report),
+    record_threshold: String(base.record_threshold),
+  }
+}
+
 function CustomPolicyBuilder({
   baselines,
   onCreated,
@@ -737,12 +898,28 @@ function CustomPolicyBuilder({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [typeOdps, setTypeOdps] = useState<Record<string, ODPFormState>>({})
   const [saving, setSaving] = useState(false)
 
   const toggleType = (type: string) => {
-    setSelectedTypes((prev) =>
-      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-    )
+    setSelectedTypes((prev) => {
+      const next = prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+      // Pre-populate ODPs from baseline when adding a type
+      if (!prev.includes(type)) {
+        const base = baselines.find((b) => b.incident_type === type)
+        if (base) {
+          setTypeOdps((odps) => ({ ...odps, [type]: baselineToOdpDefaults(base) }))
+        }
+      }
+      return next
+    })
+  }
+
+  const updateTypeOdp = (type: string, patch: Partial<ODPFormState>) => {
+    setTypeOdps((prev) => ({
+      ...prev,
+      [type]: { ...prev[type], ...patch },
+    }))
   }
 
   const handleSave = async () => {
@@ -752,31 +929,57 @@ function CustomPolicyBuilder({
     }
     setSaving(true)
     try {
-      // For now, we save as ODPs for the selected incident types with a note
-      const promises = selectedTypes.map((incidentType) =>
-        apiFetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
+      const odpSet: Record<string, Record<string, string>> = {}
+      const promises = selectedTypes.map((incidentType) => {
+        const odps = typeOdps[incidentType] || baselineToOdpDefaults(baselines.find((b) => b.incident_type === incidentType)!)
+        const emailResult = csvToJson(odps.escalation_contacts, true)
+        if (emailResult.error) {
+          alert(`Invalid escalation contacts for ${getIncidentName(incidentType)}: ${emailResult.error}`)
+          setSaving(false)
+          return Promise.resolve()
+        }
+        odpSet[incidentType] = {
+          severity_threshold: odps.severity_threshold,
+          auto_contain_enabled: odps.auto_contain_enabled === 'true' ? 'true' : 'false',
+          escalation_contacts: emailResult.value,
+          response_time_sla: String(parseInt(odps.response_time_sla, 10) || 0),
+          forensic_level: odps.forensic_level,
+          notify_targets: csvToJson(odps.notify_targets).value,
+          compliance_report: odps.compliance_report === 'true' ? 'true' : 'false',
+          record_threshold: String(parseInt(odps.record_threshold, 10) || 0),
+        }
+        return apiFetch(`${API_BASE}/policy-builder/odps/${incidentType}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            odps: {
-              severity_threshold: 'high',
-              auto_contain_enabled: 'true',
-              escalation_contacts: '[]',
-              response_time_sla: '60',
-              forensic_level: 'full',
-              notify_targets: '[]',
-              compliance_report: 'true',
-              record_threshold: '10',
-            },
+            odps: odpSet[incidentType],
           }),
         })
-      )
+      })
       await Promise.all(promises)
-      alert(`Custom policy "${name}" saved for ${selectedTypes.length} incident types.`)
+
+      // Create a reusable template so it appears in the simulator dropdown
+      const tplRes = await apiFetch(`${API_BASE}/policy-builder/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: `TPL-${name.replace(/\s+/g, '-').toUpperCase()}-${Date.now().toString(36).slice(-4)}`,
+          name,
+          description: description || `Custom policy for ${selectedTypes.length} incident types`,
+          odp_set: odpSet,
+        }),
+      })
+      if (!tplRes.ok) {
+        const err = await tplRes.json().catch(() => ({ detail: 'Template creation failed' }))
+        console.warn('Template creation warning:', err)
+      }
+
+      alert(`Custom policy "${name}" saved and template created for ${selectedTypes.length} incident types.`)
       onCreated()
       setName('')
       setDescription('')
       setSelectedTypes([])
+      setTypeOdps({})
     } catch (err: any) {
       alert('Failed to save custom policy: ' + (err.message || 'Unknown error'))
     }
@@ -834,6 +1037,96 @@ function CustomPolicyBuilder({
           ))}
         </div>
       </div>
+
+      {/* Per-incident-type ODP editor */}
+      {selectedTypes.length > 0 && (
+        <div className="border border-gray-200 rounded-lg p-3 space-y-4 bg-gray-50">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <Edit3 className="w-4 h-4 text-blue-600" />
+            Configure ODPs for Selected Types
+          </div>
+          {selectedTypes.map((type) => {
+            const base = baselines.find((b) => b.incident_type === type)
+            const odps = typeOdps[type] || (base ? baselineToOdpDefaults(base) : {} as ODPFormState)
+            return (
+              <div key={type} className="bg-white rounded border border-gray-200 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded">{type}</span>
+                  <span className="text-sm font-medium text-gray-900">{getIncidentName(type)}</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 mb-1">Severity</label>
+                    <select
+                      value={odps.severity_threshold}
+                      onChange={(e) => updateTypeOdp(type, { severity_threshold: e.target.value })}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                    >
+                      <option value="critical">Critical</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 mb-1">Auto Contain</label>
+                    <select
+                      value={odps.auto_contain_enabled}
+                      onChange={(e) => updateTypeOdp(type, { auto_contain_enabled: e.target.value })}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 mb-1">SLA (s)</label>
+                    <input
+                      type="number"
+                      value={odps.response_time_sla}
+                      onChange={(e) => updateTypeOdp(type, { response_time_sla: e.target.value })}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 mb-1">Forensics</label>
+                    <select
+                      value={odps.forensic_level}
+                      onChange={(e) => updateTypeOdp(type, { forensic_level: e.target.value })}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                    >
+                      <option value="full">Full</option>
+                      <option value="standard">Standard</option>
+                      <option value="basic">Basic</option>
+                      <option value="none">None</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 mb-1">Compliance</label>
+                    <select
+                      value={odps.compliance_report}
+                      onChange={(e) => updateTypeOdp(type, { compliance_report: e.target.value })}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                    >
+                      <option value="true">Required</option>
+                      <option value="false">Optional</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-gray-500 mb-1">Threshold</label>
+                    <input
+                      type="number"
+                      value={odps.record_threshold}
+                      onChange={(e) => updateTypeOdp(type, { record_threshold: e.target.value })}
+                      className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <button

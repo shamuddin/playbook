@@ -56,6 +56,7 @@ function AppRoutes() {
         <Route path="review" element={<ReviewQueuePage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="forensics/:id" element={<ForensicsPage />} />
+        <Route path="forensics" element={<Navigate to="/incidents" replace />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="playground" element={<PlaygroundPage />} />
         <Route path="swarm" element={<AgentSwarmPage />} />

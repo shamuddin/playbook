@@ -7,6 +7,30 @@ import { useWebSocket } from '../hooks/useWebSocket'
 
 const API_BASE = getApiBase()
 
+const INCIDENT_TYPE_NAMES: Record<string, string> = {
+  'AGT-DEL-001': 'Data Destruction',
+  'AGT-FIN-002': 'Unauthorized Financial',
+  'AGT-PER-003': 'Permission Escalation',
+  'AGT-HRM-004': 'Harmful Output',
+  'AGT-EXT-005': 'Data Exfiltration',
+  'AGT-INJ-006': 'Prompt Injection',
+  'AGT-HAL-007': 'Hallucination Cascade',
+  'AGT-CRE-008': 'Credential Exposure',
+  'AGT-RAT-009': 'Rate Limit Abuse',
+  'AGT-DRF-010': 'Model Drift',
+  'AGT-TLM-011': 'Tool Misuse',
+  'AGT-GAP-012': 'Coverage Gap',
+  'AGT-SPY-013': 'Systematic Espionage',
+  'AGT-BYP-014': 'Guardrail Bypass',
+  'AGT-PRV-015': 'Privacy Violation',
+  'AGT-REG-016': 'Regulatory Trigger',
+  'AGT-POL-017': 'Organization Policy Switching',
+}
+
+function getIncidentName(code: string): string {
+  return INCIDENT_TYPE_NAMES[code] || code
+}
+
 interface AgentOption {
   system_id: string
   name: string
@@ -266,7 +290,10 @@ export default function IncidentsPage() {
                     onClick={() => navigate(`/incidents/${inc.incident_id}`)}
                   >
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{inc.incident_id}</td>
-                    <td className="px-4 py-3 text-gray-900">{inc.incident_type}</td>
+                    <td className="px-4 py-3 text-gray-900">
+                      <div className="font-medium">{getIncidentName(inc.incident_type)}</div>
+                      <div className="text-xs text-gray-500 font-mono">{inc.incident_type}</div>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${severityBadge(inc.severity)}`}>
                         {inc.severity}

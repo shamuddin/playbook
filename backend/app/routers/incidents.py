@@ -22,6 +22,7 @@ from app.schemas import (
     TimelineEventResponse,
 )
 from app.models import EvidencePackage, JudgeDecision
+from app.core.constants import INCIDENT_TYPES
 from app.services.detect import DetectionEngine, IncidentFactory, normalize_event
 from app.services.forensics import ForensicsService
 from app.services.gemini_reasoning import analyze_incident
@@ -53,6 +54,7 @@ async def _get_incident_or_404(
 
 def _incident_to_response(incident: Incident, judge_verdict: Optional[str] = None) -> IncidentResponse:
     """Convert an Incident model to an IncidentResponse schema."""
+    description = f"{INCIDENT_TYPES.get(incident.incident_type, incident.incident_type)} incident detected"
     return IncidentResponse(
         id=incident.id,
         incident_id=incident.incident_id,
@@ -67,7 +69,7 @@ def _incident_to_response(incident: Incident, judge_verdict: Optional[str] = Non
         forensics_status=incident.forensics_status,
         judge_verdict=judge_verdict,
         bypass_detected=incident.bypass_detected,
-        description=incident.event_id or '',
+        description=description,
         agent_id=incident.agent_id or '',
         swarm_id=incident.swarm_id or '',
         created_at=incident.created_at,
@@ -92,6 +94,22 @@ async def create_incident(
 
     Use /ingest to auto-detect from a raw event.
     """
+    # Resolve agent_id / swarm_id from explicit fields or metadata
+    agent_id = data.agent_id
+    swarm_id = data.swarm_id
+    if not agent_id and data.metadata:
+        agent_id = (
+            data.metadata.get("event", {}).get("agent_id")
+            or data.metadata.get("event_raw", {}).get("agent_id")
+            or None
+        )
+    if not swarm_id and data.metadata:
+        swarm_id = (
+            data.metadata.get("event", {}).get("session_id")
+            or data.metadata.get("event_raw", {}).get("session_id")
+            or None
+        )
+
     incident = Incident(
         incident_id=IncidentFactory._generate_incident_id(),
         event_id=data.event_id,
@@ -103,6 +121,8 @@ async def create_incident(
         deterministic_classification=True,
         response_status="pending",
         forensics_status="pending",
+        agent_id=agent_id,
+        swarm_id=swarm_id,
     )
     db.add(incident)
     await db.flush()
@@ -548,6 +568,117 @@ async def get_incident_forensics(
     return StandardResponse(data=data, message=message)
 
 
+@router.get("/{incident_id}/metadata", response_model=StandardResponse)
+async def get_incident_metadata(
+    incident_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> StandardResponse:
+    """Get incident metadata including raw event data, agent prompt, and judge rationale."""
+    from app.models import JudgeDecision
+
+    incident = await _get_incident_or_404(db, incident_id)
+
+    meta_result = await db.execute(
+        select(IncidentMetadata).where(IncidentMetadata.incident_id == incident.id)
+    )
+    metadata = meta_result.scalar_one_or_none()
+
+    # Load linked judge decision for rationale
+    judge_rationale = None
+    judge_verdict = None
+    if incident.judge_decision_id:
+        jd_result = await db.execute(
+            select(JudgeDecision).where(JudgeDecision.id == incident.judge_decision_id)
+        )
+        jd = jd_result.scalar_one_or_none()
+        if jd:
+            judge_rationale = jd.rationale
+            judge_verdict = jd.verdict
+
+    if metadata is None:
+        return StandardResponse(data={
+            "judge_verdict": judge_verdict,
+            "judge_rationale": judge_rationale,
+        }, message="No metadata found for this incident")
+
+    raw = metadata.full_metadata_json or {}
+    event_raw = raw.get("event_raw", {})
+    detection = raw.get("detection", {})
+    event_meta = event_raw.get("metadata", {}) if isinstance(event_raw, dict) else {}
+
+    # Extract agent prompt / situation from multiple possible locations
+    prompt = (
+        event_meta.get("situation")
+        or event_meta.get("declared_intent")
+        or event_meta.get("prompt")
+        or event_meta.get("agent_thought")
+        or event_raw.get("action_type")
+        or event_raw.get("input")
+        or event_raw.get("prompt")
+        or None
+    )
+
+    # Extract agent reasoning / thought
+    reasoning = (
+        event_meta.get("agent_thought")
+        or event_meta.get("reasoning")
+        or event_meta.get("thought")
+        or event_raw.get("reasoning")
+        or event_raw.get("thought")
+        or None
+    )
+
+    # Extract the specific command / tool call that was blocked
+    tool_call = ""
+    if isinstance(event_raw, dict):
+        tool = event_raw.get("tool", "")
+        inp = event_raw.get("input", "")
+        action = event_raw.get("action_summary", "")
+        if tool and inp:
+            tool_call = f"{tool} {inp}"
+        elif tool:
+            tool_call = tool
+        elif action:
+            tool_call = action
+        elif inp:
+            tool_call = inp
+
+    # Extract output / response
+    output = None
+    if isinstance(event_raw, dict):
+        output = (
+            event_raw.get("output")
+            or event_raw.get("result")
+            or event_raw.get("response")
+            or None
+        )
+
+    data = {
+        "incident_type_name": detection.get("incident_type_name", incident.incident_type),
+        "intent_category": metadata.intent_category,
+        "risk_score": metadata.risk_score,
+        "contains_injection_patterns": metadata.contains_injection_patterns,
+        "contains_pii": metadata.contains_pii,
+        "contains_credentials": metadata.contains_credentials,
+        "contains_exfiltration": metadata.contains_exfiltration,
+        "contains_system_commands": metadata.contains_system_commands,
+        "event_source": raw.get("event", {}).get("source"),
+        "event_type": raw.get("event", {}).get("event_type"),
+        "agent_id": raw.get("event", {}).get("agent_id") or incident.agent_id,
+        "session_id": raw.get("event", {}).get("session_id") or incident.swarm_id,
+        "timestamp": raw.get("event", {}).get("timestamp"),
+        "prompt": prompt,
+        "reasoning": reasoning,
+        "tool_call": tool_call or None,
+        "output": output,
+        "judge_verdict": judge_verdict,
+        "judge_rationale": judge_rationale,
+        "raw_metadata": event_raw,
+    }
+
+    return StandardResponse(data=data, message="Incident metadata retrieved")
+
+
 @router.get("/{incident_id}/gemini-analysis", response_model=StandardResponse)
 async def get_incident_gemini_analysis(
     incident_id: str,
@@ -580,7 +711,7 @@ async def get_incident_gemini_analysis(
         if jd:
             verdict = jd.verdict
 
-    analysis = analyze_incident(
+    analysis = await analyze_incident(
         incident_type=incident.incident_type,
         severity=incident.severity or "medium",
         confidence=incident.confidence or 0.0,

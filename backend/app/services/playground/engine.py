@@ -817,6 +817,36 @@ class PlaygroundEngine:
             async def _send_email_alert():
                 try:
                     from app.services.notification_service import NotificationService
+                    from app.database import AsyncSessionLocal
+                    from app.models import NistBaseline, OrganizationODP
+                    from sqlalchemy import select
+                    import json
+
+                    to_addrs = None
+                    try:
+                        async with AsyncSessionLocal() as db:
+                            baseline_result = await db.execute(
+                                select(NistBaseline).where(NistBaseline.incident_type == incident.incident_type)
+                            )
+                            baseline = baseline_result.scalar_one_or_none()
+                            if baseline:
+                                odp_result = await db.execute(
+                                    select(OrganizationODP).where(
+                                        OrganizationODP.baseline_id == baseline.id,
+                                        OrganizationODP.odp_key == "escalation_contacts",
+                                    )
+                                )
+                                odp = odp_result.scalar_one_or_none()
+                                if odp and odp.odp_value:
+                                    try:
+                                        contacts = json.loads(odp.odp_value)
+                                        if isinstance(contacts, list) and contacts:
+                                            to_addrs = contacts
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+
                     service = NotificationService()
                     msg = {
                         "title": f"PLAYBOOK Alert: {incident.severity.upper()} {incident.incident_type}",
@@ -831,6 +861,7 @@ class PlaygroundEngine:
                         ),
                         "severity": incident.severity,
                         "incident_id": incident.incident_id,
+                        "to": to_addrs,
                     }
                     await service.send("email", msg)
                     await service.close()

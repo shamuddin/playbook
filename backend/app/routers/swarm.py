@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,8 +17,17 @@ from app.services.swarm_orchestrator import (
     set_swarm,
     SwarmOrchestrator,
 )
+from app.models import IndustryTemplate, NistBaseline, OrganizationODP, PolicyVersion
 
 router = APIRouter(prefix="/swarm", tags=["swarm"])
+
+
+async def _get_next_version(db: AsyncSession) -> int:
+    """Get the next policy version number."""
+    from sqlalchemy import func
+    result = await db.execute(select(func.max(PolicyVersion.version_number)))
+    latest = result.scalar()
+    return (latest or 0) + 1
 
 
 @router.post("/run", response_model=StandardResponse)
@@ -25,6 +35,7 @@ async def run_swarm(
     payload: dict,
     _=Depends(get_current_user),
     credentials: HTTPAuthorizationCredentials = Depends(security_bearer),
+    db: AsyncSession = Depends(get_db),
 ) -> StandardResponse:
     """Start a new agent swarm simulation.
 
@@ -41,7 +52,56 @@ async def run_swarm(
     gcp_region = payload.get("gcp_region", "global")
     model = payload.get("model", "gemini-3.1-flash-lite")
     misbehavior_mode = payload.get("misbehavior_mode", False)
+    template_id = payload.get("template_id")
     api_key = credentials.credentials if credentials else ""
+
+    # Optionally apply template ODPs before running
+    applied_count = 0
+    if template_id:
+        tpl_result = await db.execute(
+            select(IndustryTemplate).where(IndustryTemplate.template_id == template_id)
+        )
+        template = tpl_result.scalar_one_or_none()
+        if template and template.odp_set:
+            for incident_type, settings in template.odp_set.items():
+                baseline_result = await db.execute(
+                    select(NistBaseline).where(NistBaseline.incident_type == incident_type)
+                )
+                baseline = baseline_result.scalar_one_or_none()
+                if not baseline:
+                    continue
+                for key, value in settings.items():
+                    odp_result = await db.execute(
+                        select(OrganizationODP).where(
+                            OrganizationODP.baseline_id == baseline.id,
+                            OrganizationODP.odp_key == key,
+                        )
+                    )
+                    odp = odp_result.scalar_one_or_none()
+                    if odp is None:
+                        odp = OrganizationODP(
+                            baseline_id=baseline.id,
+                            odp_key=key,
+                            odp_value=str(value),
+                            value_type="string",
+                        )
+                        db.add(odp)
+                        applied_count += 1
+                    else:
+                        version = PolicyVersion(
+                            version_number=await _get_next_version(db),
+                            baseline_id=baseline.id,
+                            odp_id=odp.id,
+                            changed_by="swarm",
+                            change_type="template_apply",
+                            from_value=odp.odp_value,
+                            to_value=str(value),
+                            change_reason=f"Applied template {template_id} via swarm",
+                        )
+                        db.add(version)
+                        odp.odp_value = str(value)
+                        applied_count += 1
+            await db.commit()
 
     # Generate session ID
     import uuid
@@ -56,7 +116,7 @@ async def run_swarm(
         api_key=api_key,
         misbehavior_mode=misbehavior_mode,
     )
-    await swarm.setup_agents(scenario_id)
+    await swarm.setup_agents(scenario_id, template_id=template_id)
 
     # Store in registry
     set_swarm(session_id, swarm)
@@ -74,8 +134,11 @@ async def run_swarm(
             "status": "running",
             "agent_count": len(swarm._agents),
             "misbehavior_mode": misbehavior_mode,
+            "template_id": template_id,
+            "template_applied": applied_count,
         },
-        message=f"Swarm '{scenario_id}' started with {len(swarm._agents)} agents",
+        message=f"Swarm '{scenario_id}' started with {len(swarm._agents)} agents"
+        + (f" ({applied_count} ODPs applied)" if applied_count else ""),
     )
 
 
@@ -143,6 +206,69 @@ async def stop_swarm(
     return StandardResponse(
         data={"session_id": session_id, "status": "stopped"},
         message="Swarm stopped",
+    )
+
+
+@router.get("/{session_id}/human-reviews", response_model=StandardResponse)
+async def list_human_reviews(
+    session_id: str,
+    _=Depends(get_current_user),
+) -> StandardResponse:
+    """List pending human review tasks for a swarm session."""
+    swarm = get_swarm(session_id)
+    if not swarm:
+        raise HTTPException(status_code=404, detail="Swarm session not found")
+
+    reviews = [
+        {"agent_id": aid, **info}
+        for aid, info in swarm._human_reviews.items()
+        if info.get("status") == "pending"
+    ]
+    return StandardResponse(
+        data={"reviews": reviews, "count": len(reviews)},
+        message=f"{len(reviews)} pending human review(s)",
+    )
+
+
+@router.post("/{session_id}/human-review/{agent_id}/approve", response_model=StandardResponse)
+async def approve_human_review(
+    session_id: str,
+    agent_id: str,
+    _=Depends(get_current_user),
+) -> StandardResponse:
+    """Approve a human review task for an agent, allowing it to proceed."""
+    swarm = get_swarm(session_id)
+    if not swarm:
+        raise HTTPException(status_code=404, detail="Swarm session not found")
+
+    if agent_id not in swarm._human_reviews:
+        raise HTTPException(status_code=404, detail="No pending human review for this agent")
+
+    swarm.submit_human_decision(agent_id, "approve")
+    return StandardResponse(
+        data={"agent_id": agent_id, "decision": "approve"},
+        message=f"Agent {agent_id} approved — proceeding with action",
+    )
+
+
+@router.post("/{session_id}/human-review/{agent_id}/deny", response_model=StandardResponse)
+async def deny_human_review(
+    session_id: str,
+    agent_id: str,
+    _=Depends(get_current_user),
+) -> StandardResponse:
+    """Deny a human review task for an agent, killing and restarting it."""
+    swarm = get_swarm(session_id)
+    if not swarm:
+        raise HTTPException(status_code=404, detail="Swarm session not found")
+
+    if agent_id not in swarm._human_reviews:
+        raise HTTPException(status_code=404, detail="No pending human review for this agent")
+
+    swarm.submit_human_decision(agent_id, "deny")
+    return StandardResponse(
+        data={"agent_id": agent_id, "decision": "deny"},
+        message=f"Agent {agent_id} denied — terminating and restarting",
     )
 
 

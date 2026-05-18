@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 from typing import List
 
 from app.core.config import get_settings
@@ -46,7 +47,7 @@ def _generate_with_gemini_sync(prompt: str) -> str:
         try:
             g = _lazy_import_genai()
             g.configure(api_key=api_key)
-            model = g.GenerativeModel("gemini-1.5-flash")
+            model = g.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             text = response.text.strip() if response and hasattr(response, "text") and response.text else ""
             if text:
@@ -64,7 +65,7 @@ def _generate_with_gemini_sync(prompt: str) -> str:
             client_mod = _lazy_import_genai_client()
             client = client_mod.Client(vertexai=True, project=project, location=location)
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
             )
             text = response.text.strip() if response and hasattr(response, "text") and response.text else ""
@@ -204,14 +205,23 @@ async def analyze_incident(
         current_key = None
         for line in text.split("\n"):
             line = line.strip()
-            if line.upper().startswith("1. THREAT_ANALYSIS") or line.upper().startswith("THREAT_ANALYSIS:"):
+            if "THREAT_ANALYSIS" in line.upper() and (":" in line or line.startswith("1.")):
                 current_key = "threat_analysis"
+                m = re.search(r":\s*(.+)", line)
+                if m:
+                    result[current_key] += (" " if result[current_key] else "") + m.group(1)
                 continue
-            elif line.upper().startswith("2. IMPACT_ASSESSMENT") or line.upper().startswith("IMPACT_ASSESSMENT:"):
+            elif "IMPACT_ASSESSMENT" in line.upper() and (":" in line or line.startswith("2.")):
                 current_key = "impact_assessment"
+                m = re.search(r":\s*(.+)", line)
+                if m:
+                    result[current_key] += (" " if result[current_key] else "") + m.group(1)
                 continue
-            elif line.upper().startswith("3. REMEDIATION") or line.upper().startswith("REMEDIATION:"):
+            elif "REMEDIATION" in line.upper() and (":" in line or line.startswith("3.")):
                 current_key = "remediation"
+                m = re.search(r":\s*(.+)", line)
+                if m:
+                    result[current_key] += (" " if result[current_key] else "") + m.group(1)
                 continue
             elif current_key and line:
                 result[current_key] += (" " if result[current_key] else "") + line
@@ -247,13 +257,6 @@ async def generate_compliance_report(framework: str, gaps: list) -> dict:
     Uses live Gemini via API key or Vertex AI ADC. Falls back to deterministic text.
     Returns a dict with overview, critical_gaps, and recommendations.
     """
-    if not gaps:
-        return {
-            "overview": f"Gap analysis for {framework} has been completed. Review the detailed mapping table for control coverage and deficiency identification.",
-            "critical_gaps": "Focus on incident reporting and risk management controls, as these are typically the most scrutinized during regulatory audits.",
-            "recommendations": "Prioritize implementing automated evidence collection and establish a regular review cadence for policy updates.",
-        }
-
     prompt = _build_compliance_report_prompt(framework, gaps)
     text = await generate_with_gemini(prompt)
 
@@ -262,14 +265,23 @@ async def generate_compliance_report(framework: str, gaps: list) -> dict:
         current_key = None
         for line in text.split("\n"):
             line = line.strip()
-            if line.upper().startswith("1. OVERVIEW") or line.upper().startswith("OVERVIEW:"):
+            if "OVERVIEW" in line.upper() and (":" in line or line.startswith("1.")):
                 current_key = "overview"
+                m = re.search(r":\s*(.+)", line)
+                if m:
+                    result[current_key] += (" " if result[current_key] else "") + m.group(1)
                 continue
-            elif line.upper().startswith("2. CRITICAL_GAPS") or line.upper().startswith("CRITICAL_GAPS:"):
+            elif "CRITICAL_GAPS" in line.upper() and (":" in line or line.startswith("2.")):
                 current_key = "critical_gaps"
+                m = re.search(r":\s*(.+)", line)
+                if m:
+                    result[current_key] += (" " if result[current_key] else "") + m.group(1)
                 continue
-            elif line.upper().startswith("3. RECOMMENDATIONS") or line.upper().startswith("RECOMMENDATIONS:"):
+            elif "RECOMMENDATIONS" in line.upper() and (":" in line or line.startswith("3.")):
                 current_key = "recommendations"
+                m = re.search(r":\s*(.+)", line)
+                if m:
+                    result[current_key] += (" " if result[current_key] else "") + m.group(1)
                 continue
             elif current_key and line:
                 result[current_key] += (" " if result[current_key] else "") + line
