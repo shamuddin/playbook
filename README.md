@@ -1,5 +1,7 @@
 <div align="center">
 
+![PLAYBOOK SOAR Banner](assets/playbook-banner.png)
+
 # 🔒 PLAYBOOK — AI Agent Security & Governance Platform
 
 > **The deterministic SOAR layer that intercepts, judges, and contains rogue AI agents before they do damage.**

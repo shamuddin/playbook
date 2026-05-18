@@ -94,8 +94,8 @@ backend/*.json
 # Production env files
 .env.production
 
-# Claude local settings
-.claude/settings.local.json
+# Claude IDE artifacts
+.claude/
 
 # Misc junk
 EOF
