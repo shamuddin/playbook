@@ -84,13 +84,18 @@ projectdocs_V3.0
 /screenshot_*.png
 /*.pid
 /*_err.log
-.claude/
+
+# Backend API response dumps (often contain auth tokens / PII)
+backend/*.json
 
 # Playwright MCP artifacts
 .playwright-mcp/
 
 # Production env files
 .env.production
+
+# Claude local settings
+.claude/settings.local.json
 
 # Misc junk
 EOF
