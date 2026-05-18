@@ -327,13 +327,18 @@ async def list_frameworks(
     result = await db.execute(
         select(ComplianceMapping.framework).distinct()
     )
+    db_frameworks = {row[0] for row in result.all()}
+
+    # Always include well-known frameworks from FRAMEWORK_META, even if no mappings exist yet
+    all_frameworks = set(FRAMEWORK_META.keys()) | db_frameworks
+
     frameworks = [
         {
-            "name": row[0],
-            "display_name": FRAMEWORK_META.get(row[0], {}).get("display_name", row[0].replace("_", " ").title()),
-            "version": FRAMEWORK_META.get(row[0], {}).get("version", ""),
+            "name": fw,
+            "display_name": FRAMEWORK_META.get(fw, {}).get("display_name", fw.replace("_", " ").title()),
+            "version": FRAMEWORK_META.get(fw, {}).get("version", ""),
         }
-        for row in result.all()
+        for fw in sorted(all_frameworks)
     ]
 
     framework_stats = {}

@@ -84,6 +84,7 @@ projectdocs_V3.0
 /screenshot_*.png
 /*.pid
 /*_err.log
+.claude/
 
 # Playwright MCP artifacts
 .playwright-mcp/

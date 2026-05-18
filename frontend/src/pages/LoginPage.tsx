@@ -7,7 +7,7 @@ export default function LoginPage() {
   const { login, user } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('demo@playbook.local')
-  const [password, setPassword] = useState('demo123')
+  const [password, setPassword] = useState('demo1234')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -101,7 +101,7 @@ export default function LoginPage() {
           </form>
 
           <p className="mt-4 text-xs text-gray-500 text-center">
-            Demo credentials: <code className="bg-gray-100 px-1 py-0.5 rounded">demo@playbook.local</code> / <code className="bg-gray-100 px-1 py-0.5 rounded">demo123</code>
+            Demo credentials: <code className="bg-gray-100 px-1 py-0.5 rounded">demo@playbook.local</code> / <code className="bg-gray-100 px-1 py-0.5 rounded">demo1234</code>
           </p>
         </div>
       </div>

@@ -152,7 +152,7 @@ class BypassPatternResponse(BaseModel):
 class BypassAttemptResponse(BaseModel):
     id: str
     incident_id: str
-    pattern_id: str
+    pattern_id: Optional[str]
     detection_confidence: float
     blocked_at: datetime
 

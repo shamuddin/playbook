@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import (
     JSON,
@@ -326,8 +327,8 @@ class BypassAttempt(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     incident_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    pattern_id: Mapped[str] = mapped_column(
-        ForeignKey("bypass_patterns.id"), nullable=False
+    pattern_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("bypass_patterns.id"), nullable=True
     )
     detection_confidence: Mapped[float] = mapped_column(Float, default=1.0)
     payload_sample: Mapped[str] = mapped_column(Text, nullable=True)

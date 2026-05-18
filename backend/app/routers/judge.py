@@ -113,7 +113,7 @@ async def evaluate_action(
                 select(BypassPattern).where(BypassPattern.pattern_name == pattern_name)
             )
             pattern = pattern_result.scalar_one_or_none()
-            pattern_id = pattern.id if pattern else ""
+            pattern_id = pattern.id if pattern else None
 
             attempt = BypassAttempt(
                 incident_id=bypass_incident.id,
